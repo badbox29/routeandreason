@@ -2155,7 +2155,7 @@ async function doFriendSearch() {
 
     // Can't add yourself
     if (result.token === state.token) {
-      el.innerHTML = '<div class="widget-empty">That's you!</div>';
+      el.innerHTML = '<div class="widget-empty">That\'s you!</div>';
       return;
     }
 
