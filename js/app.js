@@ -1693,6 +1693,7 @@ document.getElementById('btn-import-token').addEventListener('click', () => {
   document.getElementById('settings-import-token').value = '';
   showToast('Token updated. Reloading data…');
   loadProfileFromKV().then(() => {
+    saveSettings(); // persist downloaded profile to localStorage cache
     loadEntries().then(async () => {
       await loadFriendEntries();
       renderFeed();
@@ -1777,12 +1778,15 @@ document.getElementById('btn-save-settings').addEventListener('click', async () 
 
       // Worker is reachable — pull profile then reload entries
       await loadProfileFromKV();
+      // Re-save to localStorage now that profile is populated from KV
+      saveSettings();
       await loadEntries();
       await loadFriendEntries();
       renderFeed();
       renderSpotlight();
       renderSavedRoutes();
       renderWeatherSidebar();
+      updateWorkerDependentToggles();
       updateFriendsBadge();
 
       const { count, entries: unsynced } = await countUnsyncedLocalEntries();
