@@ -1344,3 +1344,11 @@ a:hover { text-decoration: underline; }
   vertical-align: middle;
   flex-shrink: 0;
 }
+
+.friends-modal-username {
+  font-size: 0.8rem;
+  color: var(--green-mid);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  margin-top: 0.15rem;
+}
