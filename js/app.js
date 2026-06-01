@@ -2031,6 +2031,11 @@ document.querySelectorAll('.friends-tab').forEach(tab => {
 });
 
 function renderFriendsModal() {
+  const usernameEl = document.getElementById('friends-modal-username');
+  if (usernameEl) {
+    usernameEl.textContent = state.username ? `@${state.username}` : 'No username set — add one in Settings';
+    usernameEl.style.color = state.username ? 'var(--green-mid)' : 'var(--ink-muted)';
+  }
   renderFriendsList();
   renderRequestsPanels();
   updateFriendsBadge();
