@@ -295,7 +295,8 @@ async function loadProfileFromKV() {
   if (!state.workerUrl) return;
   try {
     const profile = await kvGet('profile');
-    if (!profile) return;
+    console.log('[Profile KV] raw value:', JSON.stringify(profile));
+    if (!profile) { console.warn('[Profile KV] no profile found in KV'); return; }
     if (profile.username   != null) state.username   = profile.username;
     if (profile.sex        != null) state.sex        = profile.sex;
     if (profile.ageyears   != null) state.ageyears   = profile.ageyears;
@@ -306,10 +307,11 @@ async function loadProfileFromKV() {
     if (profile.friends    != null) state.friends    = profile.friends;
     if (profile.incomingReqs != null) state.incomingReqs = profile.incomingReqs;
     if (profile.outgoingReqs != null) state.outgoingReqs = profile.outgoingReqs;
+    console.log('[Profile KV] state after load — sex:', state.sex, 'age:', state.ageyears, 'height:', state.heightIn, 'weight:', state.weightLbs);
     // Sync to localStorage as cache
     saveSettings();
   } catch(e) {
-    console.warn('Profile KV load failed:', e.message);
+    console.warn('[Profile KV] load failed:', e.message);
   }
 }
 
