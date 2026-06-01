@@ -274,18 +274,26 @@ async function kvList() {
 async function saveProfileToKV() {
   if (!state.workerUrl) return;
   try {
-    await kvPut('profile', {
-      username:    state.username,
-      sex:         state.sex,
-      ageyears:    state.ageyears,
-      heightIn:    state.heightIn,
-      weightLbs:   state.weightLbs,
-      pageSize:    state.pageSize,
-      weatherLocs: state.weatherLocs,
-      friends:     state.friends,
-      incomingReqs: state.incomingReqs,
-      outgoingReqs: state.outgoingReqs,
-    });
+    // Read existing KV profile first so we don't overwrite fields
+    // that exist in KV but are null locally (e.g. on a new browser
+    // that hasn't had all fields entered yet).
+    let existing = {};
+    try { existing = (await kvGet('profile')) || {}; } catch(e) { /* first save */ }
+
+    const merged = {
+      username:     state.username    ?? existing.username    ?? null,
+      sex:          state.sex         ?? existing.sex         ?? null,
+      ageyears:     state.ageyears    ?? existing.ageyears    ?? null,
+      heightIn:     state.heightIn    ?? existing.heightIn    ?? null,
+      weightLbs:    state.weightLbs   ?? existing.weightLbs   ?? null,
+      pageSize:     state.pageSize    ?? existing.pageSize    ?? 20,
+      weatherLocs:  state.weatherLocs?.length ? state.weatherLocs : (existing.weatherLocs ?? []),
+      friends:      state.friends     ?? existing.friends     ?? [],
+      incomingReqs: state.incomingReqs ?? existing.incomingReqs ?? [],
+      outgoingReqs: state.outgoingReqs ?? existing.outgoingReqs ?? [],
+    };
+
+    await kvPut('profile', merged);
   } catch(e) {
     console.warn('Profile KV save failed:', e.message);
   }
@@ -295,20 +303,20 @@ async function loadProfileFromKV() {
   if (!state.workerUrl) return;
   try {
     const profile = await kvGet('profile');
-    console.log('[Profile KV] raw value:', JSON.stringify(profile));
-    if (!profile) { console.warn('[Profile KV] no profile found in KV'); return; }
+    if (!profile) return;
+    // Only overwrite local state if KV has a non-null value.
+    // This means local data is never clobbered by nulls from KV.
     if (profile.username   != null) state.username   = profile.username;
     if (profile.sex        != null) state.sex        = profile.sex;
     if (profile.ageyears   != null) state.ageyears   = profile.ageyears;
     if (profile.heightIn   != null) state.heightIn   = profile.heightIn;
     if (profile.weightLbs  != null) state.weightLbs  = profile.weightLbs;
     if (profile.pageSize   != null) state.pageSize   = profile.pageSize;
-    if (profile.weatherLocs != null) state.weatherLocs = profile.weatherLocs;
-    if (profile.friends    != null) state.friends    = profile.friends;
-    if (profile.incomingReqs != null) state.incomingReqs = profile.incomingReqs;
-    if (profile.outgoingReqs != null) state.outgoingReqs = profile.outgoingReqs;
-    console.log('[Profile KV] state after load — sex:', state.sex, 'age:', state.ageyears, 'height:', state.heightIn, 'weight:', state.weightLbs);
-    // Sync to localStorage as cache
+    if (Array.isArray(profile.weatherLocs) && profile.weatherLocs.length > 0) state.weatherLocs = profile.weatherLocs;
+    if (Array.isArray(profile.friends))     state.friends     = profile.friends;
+    if (Array.isArray(profile.incomingReqs)) state.incomingReqs = profile.incomingReqs;
+    if (Array.isArray(profile.outgoingReqs)) state.outgoingReqs = profile.outgoingReqs;
+    // Sync merged state to localStorage as cache
     saveSettings();
   } catch(e) {
     console.warn('[Profile KV] load failed:', e.message);
@@ -2241,11 +2249,11 @@ async function init() {
   loadSettings();
 
   if (state.workerUrl) {
-    // Pull profile from KV — merges any roaming settings into local state
+    // Pull profile from KV — merges roaming settings into local state.
+    // We do NOT push back on init — that would overwrite KV with whatever
+    // happens to be in localStorage at load time, which may be incomplete.
+    // Profile is only pushed when the user explicitly saves settings or username.
     await loadProfileFromKV();
-    // Push local profile up in case this is the original browser with data
-    // that hasn't been synced yet. Safe to call every time — it's just a PUT.
-    await saveProfileToKV();
   }
 
   await loadEntries();
