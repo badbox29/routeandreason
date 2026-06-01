@@ -15,6 +15,16 @@ const SLOPE_COLORS = [
   { max: Infinity, color: '#b71c1c' },
 ];
 
+// ─── Day/Night Toggle ─────────────────────────────────────────────
+function tdnn() {
+  const moon   = document.getElementsByClassName('moon')[0];
+  const toggle = document.getElementsByClassName('tdnn')[0];
+  if (!moon || !toggle) return;
+  moon.classList.toggle('sun');
+  toggle.classList.toggle('day');
+  document.body.classList.toggle('dark');
+}
+
 // ─── State ────────────────────────────────────────────────────────
 const state = {
   token:       null,
