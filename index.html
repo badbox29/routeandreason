@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Route &amp; Reason — Walk Journal</title>
+  <meta name="description" content="A personal journal for walks, journeys, and life on foot." />
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Leaflet Routing Machine (snap-to-road via OSRM fallback + Google via worker) -->
+  <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.min.js"></script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <!-- ─── Top Nav ─────────────────────────────────────────────────── -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-icon">⟡</span>
+        <span class="brand-name">Route &amp; Reason</span>
+      </div>
+      <nav class="header-actions">
+        <button class="btn btn-ghost" id="btn-new-entry">Log a Journal Entry</button>
+        <button class="btn btn-primary" id="btn-new-journey">Log a Journey</button>
+        <button class="btn btn-icon btn-friends" id="btn-friends" title="Friends">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          <span class="friends-badge" id="friends-badge" style="display:none"></span>
+        </button>
+        <button class="btn btn-icon" id="btn-settings" title="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ─── Main Layout ──────────────────────────────────────────────── -->
+  <main class="main-layout">
+
+    <!-- Feed Column -->
+    <div class="feed-column">
+
+      <!-- Spotlight Card -->
+      <section class="spotlight" id="spotlight-section">
+        <div class="spotlight-label">✦ From the archives</div>
+        <div class="spotlight-content" id="spotlight-content">
+          <div class="spotlight-empty">Your past journeys will appear here as a daily highlight.</div>
+        </div>
+      </section>
+
+      <!-- Feed Header -->
+      <div class="feed-header">
+        <h2 class="feed-title">Your Journal</h2>
+        <div class="feed-controls">
+          <select class="select-filter" id="filter-type">
+            <option value="all">All entries</option>
+            <option value="journey">Journeys only</option>
+            <option value="journal">Journal only</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Entry Feed -->
+      <div class="entry-feed" id="entry-feed">
+        <div class="feed-empty" id="feed-empty">
+          <div class="feed-empty-icon">🌿</div>
+          <p>No entries yet. Start by logging a journey or a journal entry.</p>
+        </div>
+      </div>
+
+      <!-- Pagination -->
+      <div class="pagination" id="pagination"></div>
+
+    </div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+
+      <!-- Weather Widget -->
+      <section class="widget weather-widget">
+        <div class="widget-header">
+          <h3 class="widget-title">Conditions</h3>
+          <button class="btn btn-tiny" id="btn-add-location">+ Add location</button>
+        </div>
+        <div id="weather-locations">
+          <div class="widget-empty">Add a location to see current conditions.</div>
+        </div>
+      </section>
+
+      <!-- Saved Routes Widget -->
+      <section class="widget routes-widget">
+        <div class="widget-header">
+          <h3 class="widget-title">Saved Routes</h3>
+        </div>
+        <div id="saved-routes-list">
+          <div class="widget-empty">Save a route while logging a journey to see it here.</div>
+        </div>
+      </section>
+
+    </aside>
+  </main>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: Log a Journey                                           -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-journey" role="dialog" aria-modal="true" aria-label="Log a Journey">
+    <div class="modal modal-journey">
+      <div class="modal-header">
+        <h2 class="modal-title">Log a Journey</h2>
+        <button class="modal-close" data-close="modal-journey">✕</button>
+      </div>
+
+      <div class="modal-journey-body">
+
+        <!-- Left: Map Panel -->
+        <div class="map-panel">
+          <div class="map-search-row">
+            <input type="text" class="input map-search-input" id="map-search-input" placeholder="Search for a starting point…" />
+            <button class="btn btn-sm btn-outline" id="btn-map-search">Go</button>
+          </div>
+
+          <!-- Map Toggles -->
+          <div class="map-toggles">
+            <label class="toggle-pill">
+              <input type="checkbox" id="toggle-snap" checked />
+              <span class="toggle-track"></span>
+              <span class="toggle-label">Snap to road/trail</span>
+            </label>
+            <label class="toggle-pill">
+              <input type="checkbox" id="toggle-elevation" checked />
+              <span class="toggle-track"></span>
+              <span class="toggle-label">Elevation</span>
+            </label>
+            <label class="toggle-pill">
+              <input type="checkbox" id="toggle-slope" checked />
+              <span class="toggle-track"></span>
+              <span class="toggle-label">Slope</span>
+            </label>
+            <label class="toggle-pill toggle-disabled">
+              <input type="checkbox" id="toggle-surface" disabled />
+              <span class="toggle-track"></span>
+              <span class="toggle-label">Surface</span>
+            </label>
+            <button class="btn btn-sm btn-outline" id="btn-export-gpx">↓ GPX</button>
+          </div>
+
+          <!-- Slope Legend -->
+          <div class="slope-legend" id="slope-legend">
+            <span class="legend-item"><span class="legend-dot" style="background:#4caf50"></span>0–5%</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#cddc39"></span>5–10%</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#ff9800"></span>10–15%</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#f44336"></span>15–20%</span>
+            <span class="legend-item"><span class="legend-dot" style="background:#b71c1c"></span>20%+</span>
+          </div>
+
+          <!-- Map Container -->
+          <div id="journey-map"></div>
+
+          <!-- Map Controls -->
+          <div class="map-controls-row">
+            <button class="btn btn-sm btn-ghost" id="btn-undo-waypoint">↩ Undo</button>
+            <button class="btn btn-sm btn-ghost" id="btn-clear-route">✕ Clear</button>
+          </div>
+
+          <!-- Stats Bar -->
+          <div class="stats-bar" id="stats-bar">
+            <div class="stat-item">
+              <span class="stat-value" id="stat-distance">—</span>
+              <span class="stat-label">Distance</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value" id="stat-duration">—</span>
+              <span class="stat-label">Duration</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value" id="stat-pace">—</span>
+              <span class="stat-label">Pace</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value" id="stat-speed">—</span>
+              <span class="stat-label">Speed</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value" id="stat-calories">—</span>
+              <span class="stat-label">Calories</span>
+            </div>
+          </div>
+
+          <!-- Elevation Profile -->
+          <div class="elevation-profile" id="elevation-profile" style="display:none;">
+            <canvas id="elevation-canvas"></canvas>
+          </div>
+        </div>
+
+        <!-- Right: Journal Panel -->
+        <div class="journal-panel">
+
+          <div class="form-group">
+            <label class="form-label">Journey name</label>
+            <input type="text" class="input" id="journey-name" placeholder="e.g. Neighborhood Loop, Trail #4…" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Date</label>
+            <input type="date" class="input" id="journey-date" />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Start time</label>
+              <input type="time" class="input" id="journey-start-time" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">End time</label>
+              <input type="time" class="input" id="journey-end-time" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Mood</label>
+              <select class="input" id="journey-mood">
+                <option value="">—</option>
+                <option value="excellent">😄 Excellent</option>
+                <option value="good">🙂 Good</option>
+                <option value="neutral">😐 Neutral</option>
+                <option value="low">😔 Low</option>
+                <option value="rough">😞 Rough</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Energy at start</label>
+              <select class="input" id="journey-energy-start">
+                <option value="">—</option>
+                <option value="strong">⚡ Strong</option>
+                <option value="good">✅ Good</option>
+                <option value="moderate">〰️ Moderate</option>
+                <option value="tired">🥱 Tired</option>
+                <option value="exhausted">😮‍💨 Exhausted</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Energy at end</label>
+              <select class="input" id="journey-energy-end">
+                <option value="">—</option>
+                <option value="strong">⚡ Strong</option>
+                <option value="good">✅ Good</option>
+                <option value="moderate">〰️ Moderate</option>
+                <option value="tired">🥱 Tired</option>
+                <option value="exhausted">😮‍💨 Exhausted</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Weight override (lbs)</label>
+              <input type="number" class="input" id="journey-weight" placeholder="From settings…" min="50" max="500" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Weather</label>
+            <select class="input" id="journey-weather">
+              <option value="">—</option>
+              <option value="sunny">☀️ Sunny</option>
+              <option value="partly-cloudy">⛅ Partly cloudy</option>
+              <option value="cloudy">☁️ Cloudy</option>
+              <option value="overcast">🌥️ Overcast</option>
+              <option value="light-rain">🌦️ Light rain</option>
+              <option value="rain">🌧️ Rain</option>
+              <option value="thunderstorm">⛈️ Thunderstorm</option>
+              <option value="snow">❄️ Snow</option>
+              <option value="foggy">🌫️ Foggy</option>
+              <option value="windy">💨 Windy</option>
+              <option value="hot">🌡️ Hot</option>
+              <option value="cold">🥶 Cold</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Temperature (°F)</label>
+            <input type="number" class="input" id="journey-temp" placeholder="e.g. 68" min="-50" max="130" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Companions</label>
+            <input type="text" class="input" id="journey-companions" placeholder="e.g. Solo, With Sarah, Family…" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Journal notes</label>
+            <textarea class="input textarea" id="journey-notes" placeholder="How did it go? What did you notice? Any highlights…" rows="6"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label checkbox-label">
+              <input type="checkbox" id="journey-save-route" />
+              <span>Save this route for future walks</span>
+            </label>
+          </div>
+
+          <!-- Visibility (social stub) -->
+          <div class="form-group">
+            <label class="form-label">Visibility</label>
+            <select class="input" id="journey-visibility">
+              <option value="private">🔒 Private</option>
+              <option value="friends">👥 Friends</option>
+            </select>
+          </div>
+
+          <div class="form-actions">
+            <button class="btn btn-ghost" data-close="modal-journey">Cancel</button>
+            <button class="btn btn-primary" id="btn-save-journey">Save Journey</button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: Log a Journal Entry                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-entry" role="dialog" aria-modal="true" aria-label="Log a Journal Entry">
+    <div class="modal modal-entry">
+      <div class="modal-header">
+        <h2 class="modal-title">Log a Journal Entry</h2>
+        <button class="modal-close" data-close="modal-entry">✕</button>
+      </div>
+
+      <div class="modal-body">
+
+        <div class="form-group">
+          <label class="form-label">Date &amp; time</label>
+          <input type="datetime-local" class="input" id="entry-datetime" />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Mood</label>
+            <select class="input" id="entry-mood">
+              <option value="">—</option>
+              <option value="excellent">😄 Excellent</option>
+              <option value="good">🙂 Good</option>
+              <option value="neutral">😐 Neutral</option>
+              <option value="low">😔 Low</option>
+              <option value="rough">😞 Rough</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Energy</label>
+            <select class="input" id="entry-energy">
+              <option value="">—</option>
+              <option value="strong">⚡ Strong</option>
+              <option value="good">✅ Good</option>
+              <option value="moderate">〰️ Moderate</option>
+              <option value="tired">🥱 Tired</option>
+              <option value="exhausted">😮‍💨 Exhausted</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Weather</label>
+          <select class="input" id="entry-weather">
+            <option value="">—</option>
+            <option value="sunny">☀️ Sunny</option>
+            <option value="partly-cloudy">⛅ Partly cloudy</option>
+            <option value="cloudy">☁️ Cloudy</option>
+            <option value="overcast">🌥️ Overcast</option>
+            <option value="light-rain">🌦️ Light rain</option>
+            <option value="rain">🌧️ Rain</option>
+            <option value="thunderstorm">⛈️ Thunderstorm</option>
+            <option value="snow">❄️ Snow</option>
+            <option value="foggy">🌫️ Foggy</option>
+            <option value="windy">💨 Windy</option>
+            <option value="hot">🌡️ Hot</option>
+            <option value="cold">🥶 Cold</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Journal notes</label>
+          <textarea class="input textarea" id="entry-notes" placeholder="What's on your mind today…" rows="8"></textarea>
+        </div>
+
+        <!-- Visibility stub -->
+        <div class="form-group">
+          <label class="form-label">Visibility</label>
+          <select class="input" id="entry-visibility">
+            <option value="private">🔒 Private</option>
+            <option value="family">👨‍👩‍👧 Family</option>
+            <option value="friends">👥 Friends</option>
+          </select>
+        </div>
+
+        <div class="form-actions">
+          <button class="btn btn-ghost" id="btn-switch-to-journey">🗺 Log a journey instead</button>
+          <div class="form-actions-right">
+            <button class="btn btn-ghost" data-close="modal-entry">Cancel</button>
+            <button class="btn btn-primary" id="btn-save-entry">Save Entry</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: Settings                                                -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-settings" role="dialog" aria-modal="true" aria-label="Settings">
+    <div class="modal modal-settings">
+      <div class="modal-header">
+        <h2 class="modal-title">Settings</h2>
+        <button class="modal-close" data-close="modal-settings">✕</button>
+      </div>
+
+      <div class="modal-body">
+
+        <section class="settings-section">
+          <h3 class="settings-heading">Sync &amp; Identity</h3>
+          <div class="form-group">
+            <label class="form-label">Your user token</label>
+            <div class="token-row">
+              <input type="text" class="input input-mono" id="settings-token" readonly />
+              <button class="btn btn-sm btn-outline" id="btn-copy-token">Copy</button>
+            </div>
+            <p class="form-hint">Copy this token and enter it on another device to sync your journal across browsers.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Enter a token from another device</label>
+            <div class="token-row">
+              <input type="text" class="input input-mono" id="settings-import-token" placeholder="Paste token here…" />
+              <button class="btn btn-sm btn-primary" id="btn-import-token">Use this token</button>
+            </div>
+            <p class="form-hint form-hint-warn">⚠️ This will replace your current token. Make sure you've copied your existing one first.</p>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-heading">Worker</h3>
+          <div class="form-group">
+            <label class="form-label">Worker URL</label>
+            <input type="url" class="input" id="settings-worker-url" placeholder="https://your-worker.your-subdomain.workers.dev" />
+            <p class="form-hint">The Cloudflare Worker that proxies API calls and stores your data.</p>
+          </div>
+          <button class="btn btn-sm btn-outline" id="btn-test-worker">Test connection</button>
+          <span class="worker-status" id="worker-status"></span>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-heading">Profile</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Sex</label>
+              <select class="input" id="settings-sex">
+                <option value="">—</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Age</label>
+              <input type="number" class="input" id="settings-age" placeholder="e.g. 35" min="10" max="110" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Height (in)</label>
+              <input type="number" class="input" id="settings-height" placeholder="e.g. 70" min="36" max="96" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Weight (lbs)</label>
+              <input type="number" class="input" id="settings-weight" placeholder="e.g. 165" min="50" max="500" />
+            </div>
+          </div>
+          <p class="form-hint">Used to calculate calories burned via the Mifflin-St Jeor equation. All fields optional — more fields means more accurate results. Weight can be overridden per journey.</p>
+          <div class="form-group" style="margin-top:1rem;">
+            <label class="form-label">Username</label>
+            <div class="token-row">
+              <input type="text" class="input" id="settings-username" placeholder="e.g. karen_walks" />
+              <button class="btn btn-sm btn-outline" id="btn-save-username">Save</button>
+            </div>
+            <p class="form-hint">Used so friends can find you. Letters, numbers, - and _ only. 3–32 characters.</p>
+            <p class="form-hint" id="username-status"></p>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-heading">Feed</h3>
+          <div class="form-group">
+            <label class="form-label">Entries per page</label>
+            <select class="input" id="settings-page-size">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="30">30</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-heading">Weather Locations</h3>
+          <div id="settings-weather-locations"></div>
+          <div class="token-row" style="margin-top:0.75rem;">
+            <input type="text" class="input" id="settings-new-location" placeholder="City, State or Zip…" />
+            <button class="btn btn-sm btn-primary" id="btn-save-location">Add</button>
+          </div>
+        </section>
+
+        <div class="form-actions">
+          <button class="btn btn-ghost" data-close="modal-settings">Cancel</button>
+          <button class="btn btn-primary" id="btn-save-settings">Save Settings</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: View Entry / Journey                                    -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-view" role="dialog" aria-modal="true" aria-label="View Entry">
+    <div class="modal modal-view">
+      <div class="modal-header">
+        <h2 class="modal-title" id="view-title">Entry</h2>
+        <div class="modal-header-actions">
+          <button class="btn btn-sm btn-ghost" id="btn-edit-entry">Edit</button>
+          <button class="modal-close" data-close="modal-view">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" id="view-body"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: Sync local data to worker                               -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-sync" role="dialog" aria-modal="true" aria-label="Sync local data">
+    <div class="modal modal-confirm">
+      <div class="modal-header">
+        <h2 class="modal-title">Sync local data</h2>
+        <button class="modal-close" data-close="modal-sync">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="confirm-icon">☁️</div>
+        <p class="confirm-message" id="sync-message"></p>
+        <p class="confirm-sub">These entries are currently only saved in this browser. Syncing them will make them available on any device using your token.</p>
+        <div class="confirm-actions">
+          <button class="btn btn-ghost" data-close="modal-sync">Not now</button>
+          <button class="btn btn-primary" id="btn-confirm-sync">Sync now</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: Delete confirmation                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-delete" role="dialog" aria-modal="true" aria-label="Delete entry">
+    <div class="modal modal-confirm">
+      <div class="modal-header">
+        <h2 class="modal-title">Delete entry</h2>
+        <button class="modal-close" data-close="modal-delete">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="confirm-icon">🗑️</div>
+        <p class="confirm-message" id="delete-message"></p>
+        <p class="confirm-sub">This will remove the entry from this browser and from your synced storage. This cannot be undone.</p>
+        <div class="confirm-actions">
+          <button class="btn btn-ghost" data-close="modal-delete">Cancel</button>
+          <button class="btn btn-danger" id="btn-confirm-delete">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: Delete saved route confirmation                         -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-delete-route" role="dialog" aria-modal="true" aria-label="Delete saved route">
+    <div class="modal modal-confirm">
+      <div class="modal-header">
+        <h2 class="modal-title">Delete saved route</h2>
+        <button class="modal-close" data-close="modal-delete-route">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="confirm-icon">🗺️</div>
+        <p class="confirm-message" id="delete-route-message"></p>
+        <p class="confirm-sub">This will remove the saved route from this browser and from your synced storage. Your past journey entries that used this route will not be affected.</p>
+        <div class="confirm-actions">
+          <button class="btn btn-ghost" data-close="modal-delete-route">Cancel</button>
+          <button class="btn btn-danger" id="btn-confirm-delete-route">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: Friends                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-friends" role="dialog" aria-modal="true" aria-label="Friends">
+    <div class="modal modal-friends">
+      <div class="modal-header">
+        <h2 class="modal-title">Friends</h2>
+        <button class="modal-close" data-close="modal-friends">✕</button>
+      </div>
+
+      <!-- Tab bar -->
+      <div class="friends-tabs">
+        <button class="friends-tab active" data-tab="friends-list">
+          Friends
+          <span class="tab-badge" id="tab-badge-friends" style="display:none"></span>
+        </button>
+        <button class="friends-tab" data-tab="friends-requests">
+          Requests
+          <span class="tab-badge" id="tab-badge-requests" style="display:none"></span>
+        </button>
+        <button class="friends-tab" data-tab="friends-search">
+          Search
+        </button>
+      </div>
+
+      <!-- Tab: Friends List -->
+      <div class="friends-tab-panel active" id="friends-list">
+        <div id="friends-list-content">
+          <div class="widget-empty">No friends yet. Search for someone to add.</div>
+        </div>
+      </div>
+
+      <!-- Tab: Requests -->
+      <div class="friends-tab-panel" id="friends-requests">
+        <div class="friends-requests-section">
+          <div class="friends-section-heading">Incoming</div>
+          <div id="requests-incoming-content">
+            <div class="widget-empty">No pending requests.</div>
+          </div>
+        </div>
+        <div class="friends-requests-section">
+          <div class="friends-section-heading">Outgoing</div>
+          <div id="requests-outgoing-content">
+            <div class="widget-empty">No outgoing requests.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Search -->
+      <div class="friends-tab-panel" id="friends-search">
+        <div class="friends-search-row">
+          <input type="text" class="input" id="friend-search-input" placeholder="Search by username…" />
+          <button class="btn btn-sm btn-primary" id="btn-friend-search">Search</button>
+        </div>
+        <div id="friend-search-results"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Site Footer -->
+  <footer class="site-footer">
+    <span class="site-version">Route &amp; Reason <span class="version-badge">v0.45</span></span>
+  </footer>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
