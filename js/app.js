@@ -23,6 +23,23 @@ function tdnn() {
   moon.classList.toggle('sun');
   toggle.classList.toggle('day');
   document.body.classList.toggle('dark');
+  state.darkMode = document.body.classList.contains('dark');
+  saveSettings();
+  saveProfileToKV();
+}
+
+function applyDarkMode() {
+  const moon   = document.getElementsByClassName('moon')[0];
+  const toggle = document.getElementsByClassName('tdnn')[0];
+  if (state.darkMode) {
+    document.body.classList.add('dark');
+    moon?.classList.add('sun');
+    toggle?.classList.add('day');
+  } else {
+    document.body.classList.remove('dark');
+    moon?.classList.remove('sun');
+    toggle?.classList.remove('day');
+  }
 }
 
 // ─── State ────────────────────────────────────────────────────────
@@ -55,6 +72,7 @@ const state = {
   outgoingReqs:[],       // [{username, token, sentAt}] pending outgoing
   friendEntries:[],      // entries fetched from friends
   lastSeenFriends: {},   // {token: ISO timestamp} for "New" dot logic
+  darkMode:    false,    // day/night toggle preference
 };
 
 // ─── Utility ──────────────────────────────────────────────────────
@@ -225,6 +243,7 @@ function loadSettings() {
   state.sex        = localStorage.getItem('wj_sex') || null;
   state.username   = localStorage.getItem('wj_username') || null;
   state.lastSeenFriends = JSON.parse(localStorage.getItem('wj_last_seen') || '{}');
+  state.darkMode   = localStorage.getItem('wj_dark') === 'true';
   localStorage.setItem('wj_token', state.token);
 }
 
@@ -244,6 +263,7 @@ function saveSettings() {
   if (state.username)  localStorage.setItem('wj_username', state.username);
   else localStorage.removeItem('wj_username');
   localStorage.setItem('wj_last_seen', JSON.stringify(state.lastSeenFriends));
+  localStorage.setItem('wj_dark', state.darkMode ? 'true' : 'false');
 }
 
 // ─── Worker API ───────────────────────────────────────────────────
@@ -301,6 +321,7 @@ async function saveProfileToKV() {
       friends:      state.friends     ?? existing.friends     ?? [],
       incomingReqs: state.incomingReqs ?? existing.incomingReqs ?? [],
       outgoingReqs: state.outgoingReqs ?? existing.outgoingReqs ?? [],
+      darkMode:     state.darkMode     ?? existing.darkMode     ?? false,
     };
 
     await kvPut('profile', merged);
@@ -326,6 +347,7 @@ async function loadProfileFromKV() {
     if (Array.isArray(profile.friends))     state.friends     = profile.friends;
     if (Array.isArray(profile.incomingReqs)) state.incomingReqs = profile.incomingReqs;
     if (Array.isArray(profile.outgoingReqs)) state.outgoingReqs = profile.outgoingReqs;
+    if (profile.darkMode != null) state.darkMode = profile.darkMode;
     // Sync merged state to localStorage as cache
     saveSettings();
   } catch(e) {
@@ -2257,6 +2279,7 @@ async function doFriendSearch() {
 
 async function init() {
   loadSettings();
+  applyDarkMode();  // apply before any KV fetch to avoid flash
 
   if (state.workerUrl) {
     // Pull profile from KV — merges roaming settings into local state.
@@ -2264,6 +2287,7 @@ async function init() {
     // happens to be in localStorage at load time, which may be incomplete.
     // Profile is only pushed when the user explicitly saves settings or username.
     await loadProfileFromKV();
+    applyDarkMode();  // re-apply in case KV had a different preference
   }
 
   await loadEntries();
