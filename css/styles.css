@@ -31,6 +31,12 @@
   --font-display: 'Lora', Georgia, serif;
   --font-ui:      'DM Sans', system-ui, sans-serif;
   --transition:   0.18s ease;
+  --toggleHeight: 16em;
+  --toggleWidth: 30em;
+  --toggleBtnRadius: 10em;
+  --bgColor--night: #423966;
+  --mooncolor: #d9fbff;
+  --bgColor--day: #9ee3fb;
 }
 
 /* ── Reset & Base ───────────────────────────────────────────────── */
@@ -1351,4 +1357,68 @@ a:hover { text-decoration: underline; }
   font-family: var(--font-ui);
   font-weight: 500;
   margin-top: 0.15rem;
+}
+
+/* ── Day/Night Toggle ───────────────────────────────────────────── */
+.tdnn {
+  cursor: pointer;
+  font-size: 10%;
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  height: var(--toggleHeight);
+  width: var(--toggleWidth);
+  border-radius: var(--toggleHeight);
+  transition: all 500ms ease-in-out;
+  background: var(--bgColor--day);
+  z-index: 2000;
+}
+.tdnn.day { background: #ffbf71; }
+.moon {
+  position: absolute;
+  border-radius: 50%;
+  transition: all 400ms ease-in-out;
+  top: 3em; left: 3em;
+  transform: rotate(-75deg);
+  width: var(--toggleBtnRadius);
+  height: var(--toggleBtnRadius);
+  background: var(--bgColor--day);
+  box-shadow: 3em 2.5em 0 0em var(--mooncolor) inset,
+    rgba(255,255,255,0.1) 0em -7em 0 -4.5em,
+    rgba(255,255,255,0.1) 3em 7em 0 -4.5em,
+    rgba(255,255,255,0.1) 2em 13em 0 -4em;
+}
+.sun {
+  top: 4.5em; left: 18em;
+  transform: rotate(0deg);
+  width: 7em; height: 7em;
+  background: #fff;
+}
+@media (max-width: 768px) {
+  .tdnn { font-size: 8%; }
+}
+
+/* ── Dark mode overrides ────────────────────────────────────────── */
+body.dark {
+  --cream:        #1a1e2a;
+  --parchment:    #252a38;
+  --parchment-2:  #2e3447;
+  --parchment-3:  #363d52;
+  --ink:          #e8e4dc;
+  --ink-soft:     #c4bfb4;
+  --ink-muted:    #8a8578;
+  --border:       rgba(255,255,255,0.10);
+  --border-soft:  rgba(255,255,255,0.06);
+  --green-dark:   #1e3320;
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md:    0 4px 16px rgba(0,0,0,0.4);
+  --shadow-lg:    0 12px 40px rgba(0,0,0,0.5);
+}
+body.dark input[type=text],
+body.dark input[type=number],
+body.dark textarea,
+body.dark select {
+  background: #252a38;
+  color: var(--ink);
+  border-color: var(--border);
 }
