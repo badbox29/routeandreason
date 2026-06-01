@@ -1400,25 +1400,61 @@ a:hover { text-decoration: underline; }
 
 /* ── Dark mode overrides ────────────────────────────────────────── */
 body.dark {
-  --cream:        #1a1e2a;
-  --parchment:    #252a38;
-  --parchment-2:  #2e3447;
-  --parchment-3:  #363d52;
-  --ink:          #e8e4dc;
-  --ink-soft:     #c4bfb4;
-  --ink-muted:    #8a8578;
+  --cream:        #181c24;
+  --parchment:    #232838;
+  --parchment-2:  #2b3044;
+  --parchment-3:  #333850;
+  --ink:          #e4dfd6;
+  --ink-soft:     #b8b2a8;
+  --ink-muted:    #7a7870;
   --border:       rgba(255,255,255,0.10);
-  --border-soft:  rgba(255,255,255,0.06);
-  --green-dark:   #1e3320;
-  --shadow-sm:    0 1px 3px rgba(0,0,0,0.3);
-  --shadow-md:    0 4px 16px rgba(0,0,0,0.4);
-  --shadow-lg:    0 12px 40px rgba(0,0,0,0.5);
+  --border-soft:  rgba(255,255,255,0.07);
+  --green-dark:   #1c3022;
+  --green-pale:   rgba(74,124,89,0.25);
+  --amber-pale:   rgba(200,136,42,0.20);
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.35);
+  --shadow-md:    0 4px 16px rgba(0,0,0,0.45);
+  --shadow-lg:    0 12px 40px rgba(0,0,0,0.55);
+}
+
+/* Cards & widgets use hardcoded #fff — override them */
+body.dark .entry-card,
+body.dark .widget,
+body.dark .page-btn {
+  background: var(--parchment);
+  border-color: var(--border);
+}
+body.dark .entry-card:hover {
+  background: var(--parchment-2);
+  border-color: var(--green-light);
+}
+body.dark .select-filter {
+  background: var(--parchment);
+  color: var(--ink-soft);
+  border-color: var(--border);
 }
 body.dark input[type=text],
 body.dark input[type=number],
 body.dark textarea,
 body.dark select {
-  background: #252a38;
+  background: var(--parchment-2);
   color: var(--ink);
   border-color: var(--border);
+}
+body.dark .tag-mood,
+body.dark .tag-weather {
+  background: var(--parchment-3);
+  color: var(--ink-soft);
+}
+body.dark .tag-distance {
+  background: var(--parchment-2);
+  color: var(--ink-soft);
+}
+body.dark .tag-journey {
+  background: rgba(74,124,89,0.25);
+  color: var(--green-light);
+}
+body.dark .tag-journal {
+  background: rgba(200,136,42,0.20);
+  color: #d4a460;
 }
