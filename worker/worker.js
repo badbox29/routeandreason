@@ -239,6 +239,77 @@ async function handleOsrm(request, env) {
 }
 
 // ---------------------------------------------------------------------------
+// Username registry
+// ---------------------------------------------------------------------------
+
+async function handleUsername(request, env, pathname) {
+  if (!env.WALK_JOURNAL_KV) return errorResponse(500, "KV namespace not configured");
+
+  const parts    = pathname.split("/").filter(Boolean);
+  if (parts.length < 2) return errorResponse(400, "Username required");
+
+  const username = parts[1].toLowerCase().trim();
+
+  if (!/^[a-zA-Z0-9_-]{3,32}$/.test(username)) {
+    return errorResponse(400, "Username must be 3-32 characters (letters, numbers, - or _)");
+  }
+
+  const kvKey = "username:" + username;
+
+  if (request.method === "GET") {
+    const value = await env.WALK_JOURNAL_KV.get(kvKey, { type: "text" });
+    if (!value) return errorResponse(404, "Username not found", request);
+    return jsonResponse(JSON.parse(value), request);
+  }
+
+  if (request.method === "PUT") {
+    const body = await readBody(request);
+    if (!body || !body.token) return errorResponse(400, "token required in body");
+
+    const token = body.token;
+    if (!/^[a-zA-Z0-9_-]{8,128}$/.test(token)) {
+      return errorResponse(400, "Invalid token format");
+    }
+
+    const existing = await env.WALK_JOURNAL_KV.get(kvKey, { type: "text" });
+    if (existing) {
+      const parsed = JSON.parse(existing);
+      if (parsed.token !== token) {
+        return errorResponse(409, "Username already taken");
+      }
+    }
+
+    const reverseKey = "token_username:" + token;
+    const oldUsername = await env.WALK_JOURNAL_KV.get(reverseKey, { type: "text" });
+    if (oldUsername && oldUsername !== username) {
+      await env.WALK_JOURNAL_KV.delete("username:" + oldUsername);
+    }
+
+    await env.WALK_JOURNAL_KV.put(kvKey, JSON.stringify({ token, username }), { expirationTtl: KV_TTL });
+    await env.WALK_JOURNAL_KV.put(reverseKey, username, { expirationTtl: KV_TTL });
+
+    return jsonResponse({ ok: true }, request);
+  }
+
+  if (request.method === "DELETE") {
+    const body = await readBody(request);
+    if (!body || !body.token) return errorResponse(400, "token required in body");
+
+    const existing = await env.WALK_JOURNAL_KV.get(kvKey, { type: "text" });
+    if (!existing) return errorResponse(404, "Username not found", request);
+
+    const parsed = JSON.parse(existing);
+    if (parsed.token !== body.token) return errorResponse(403, "Not your username");
+
+    await env.WALK_JOURNAL_KV.delete(kvKey);
+    await env.WALK_JOURNAL_KV.delete("token_username:" + body.token);
+    return jsonResponse({ ok: true }, request);
+  }
+
+  return errorResponse(405, "Method not allowed");
+}
+
+// ---------------------------------------------------------------------------
 
 async function handleStorage(request, env, pathname) {
   if (!env.WALK_JOURNAL_KV) return errorResponse(500, "KV namespace not configured");
