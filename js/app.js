@@ -1216,6 +1216,8 @@ function resetEntryForm() {
 
 document.getElementById('btn-new-journey').addEventListener('click', () => openJourneyModal());
 document.getElementById('btn-settings').addEventListener('click', () => {
+  // Always re-populate from current state so username and profile
+  // fields reflect any data pulled from KV since page load
   populateSettingsModal();
   openModal('modal-settings');
 });
@@ -2231,8 +2233,13 @@ async function doFriendSearch() {
 async function init() {
   loadSettings();
 
-  // Pull profile from KV first so settings are current before rendering
-  await loadProfileFromKV();
+  if (state.workerUrl) {
+    // Pull profile from KV — merges any roaming settings into local state
+    await loadProfileFromKV();
+    // Push local profile up in case this is the original browser with data
+    // that hasn't been synced yet. Safe to call every time — it's just a PUT.
+    await saveProfileToKV();
+  }
 
   await loadEntries();
   await loadFriendEntries();
