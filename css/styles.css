@@ -644,6 +644,48 @@ a:hover { text-decoration: underline; }
 .modal-entry   { max-width: 560px; }
 .modal-settings { max-width: 520px; }
 .modal-view    { max-width: 680px; }
+.modal-discover { max-width: 780px; }
+
+#discover-map {
+  height: 300px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 1rem 0;
+  display: none;
+}
+
+.discover-search-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.discover-search-row .input {
+  flex: 1;
+}
+
+.discover-result-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border-soft);
+  font-size: 0.875rem;
+}
+
+.discover-result-item:first-child { border-top: none; }
+
+.discover-result-info { min-width: 0; }
+.discover-result-name { font-weight: 500; color: var(--ink); }
+.discover-result-meta { color: var(--ink-muted); font-size: 0.8rem; margin-top: 0.15rem; }
+
+.discover-result-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.tag-public { background: #e6f4ea; color: #1e6e34; }
 
 .modal-header {
   display: flex;
