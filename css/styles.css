@@ -524,8 +524,44 @@ a:hover { text-decoration: underline; }
 }
 
 .route-item:first-child { border-top: none; padding-top: 0; }
-.route-item-name { color: var(--ink); font-weight: 500; }
+.route-item-info { min-width: 0; }
+.route-item-name { color: var(--ink); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .route-item-dist { color: var(--ink-muted); font-size: 0.8rem; }
+.route-item-attribution {
+  color: var(--green-mid);
+  font-size: 0.75rem;
+  margin-left: 0.3rem;
+}
+
+/* Route Library Tabs */
+.route-library-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 0.75rem;
+  gap: 0;
+}
+
+.route-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: var(--transition);
+  margin-bottom: -1px;
+}
+
+.route-tab:hover { color: var(--ink); }
+
+.route-tab.active {
+  color: var(--green-mid);
+  border-bottom-color: var(--green-mid);
+  font-weight: 500;
+}
 
 .route-item-actions {
   display: flex;
