@@ -1571,11 +1571,24 @@ body.dark .select-filter {
 }
 body.dark input[type=text],
 body.dark input[type=number],
+body.dark input[type=url],
+body.dark input[type=email],
+body.dark input[type=password],
+body.dark input[type=datetime-local],
+body.dark input[type=date],
 body.dark textarea,
-body.dark select {
+body.dark select,
+body.dark .input {
   background: var(--parchment-2);
   color: var(--ink);
   border-color: var(--border);
+}
+
+body.dark .input::placeholder,
+body.dark input::placeholder,
+body.dark textarea::placeholder {
+  color: var(--ink-muted);
+  opacity: 1;
 }
 body.dark .tag-mood,
 body.dark .tag-weather {
