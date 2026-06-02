@@ -65,6 +65,7 @@ const state = {
   editingId:   null,     // entry id being edited
   suppressRouteUpdate: false, // true while bulk-loading waypoints for edit
   viewMap:     null,     // read-only view modal map
+  activeRouteTab: 'my-routes', // 'my-routes' | 'bookmarked'
   // Social
   username:    null,     // this user's chosen username
   friends:     [],       // [{username, token}] confirmed friends
@@ -1521,6 +1522,54 @@ function openViewModal(entry) {
     editEntry(entry);
   };
 
+  // Use Route button — shown for any journey with waypoints (own or friend's)
+  const useRouteBtn = document.getElementById('btn-use-route');
+  const bookmarkBtn = document.getElementById('btn-bookmark-route');
+  const hasRoute    = entry.type === 'journey' && entry.waypoints && entry.waypoints.length >= 2;
+
+  if (hasRoute) {
+    useRouteBtn.style.display = '';
+    useRouteBtn.onclick = () => {
+      closeModal('modal-view');
+      if (state.viewMap) { state.viewMap.remove(); state.viewMap = null; }
+      openJourneyModal({ waypoints: entry.waypoints, distMeters: entry.distMeters });
+    };
+  } else {
+    useRouteBtn.style.display = 'none';
+  }
+
+  // Bookmark button — only for friend entries with a route
+  if (hasRoute && entry._isFriend) {
+    const alreadyBookmarked = state.savedRoutes.some(
+      r => r._sourceEntryId === entry.id
+    );
+    bookmarkBtn.style.display = '';
+    bookmarkBtn.textContent   = alreadyBookmarked ? 'Bookmarked ✓' : 'Bookmark';
+    bookmarkBtn.disabled      = alreadyBookmarked;
+    bookmarkBtn.onclick = async () => {
+      const routeName = entry.name
+        ? `${entry.name} (@${entry._friendUsername})`
+        : `Route by @${entry._friendUsername}`;
+      const route = {
+        id:             crypto.randomUUID(),
+        name:           routeName,
+        waypoints:      entry.waypoints,
+        distMeters:     entry.distMeters,
+        createdAt:      new Date().toISOString(),
+        _bookmarked:    true,
+        _fromUsername:  entry._friendUsername,
+        _sourceEntryId: entry.id,
+      };
+      await saveRoute(route);
+      renderSavedRoutes();
+      bookmarkBtn.textContent = 'Bookmarked ✓';
+      bookmarkBtn.disabled    = true;
+      showToast(`Route bookmarked ✓`);
+    };
+  } else {
+    bookmarkBtn.style.display = 'none';
+  }
+
   // Add delete button to modal header
   const headerActions = document.querySelector('#modal-view .modal-header-actions');
   let deleteBtn = document.getElementById('btn-delete-entry');
@@ -1627,21 +1676,37 @@ function editEntry(entry) {
 // ─── Saved Routes Sidebar ─────────────────────────────────────────
 
 function renderSavedRoutes() {
-  const el = document.getElementById('saved-routes-list');
-  if (state.savedRoutes.length === 0) {
-    el.innerHTML = '<div class="widget-empty">Save a route while logging a journey to see it here.</div>';
+  const el   = document.getElementById('saved-routes-list');
+  const tab  = state.activeRouteTab;
+
+  // Update tab button states
+  document.querySelectorAll('.route-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+
+  const myRoutes    = state.savedRoutes.filter(r => !r._bookmarked);
+  const bookmarked  = state.savedRoutes.filter(r =>  r._bookmarked);
+  const routes      = tab === 'my-routes' ? myRoutes : bookmarked;
+
+  if (routes.length === 0) {
+    el.innerHTML = tab === 'my-routes'
+      ? '<div class="widget-empty">Save a route while logging a journey to see it here.</div>'
+      : '<div class="widget-empty">Bookmark routes from friends\' journeys to see them here.</div>';
     return;
   }
 
-  el.innerHTML = state.savedRoutes.map(r => `
+  el.innerHTML = routes.map(r => `
     <div class="route-item">
-      <div>
+      <div class="route-item-info">
         <div class="route-item-name">${escapeHtml(r.name)}</div>
-        <div class="route-item-dist">${formatDistance(r.distMeters)}</div>
+        <div class="route-item-dist">
+          ${formatDistance(r.distMeters)}
+          ${r._fromUsername ? `<span class="route-item-attribution">via @${escapeHtml(r._fromUsername)}</span>` : ''}
+        </div>
       </div>
       <div class="route-item-actions">
         <button class="btn-load-route" data-id="${r.id}">Load</button>
-        <button class="btn-delete-route" data-id="${r.id}" title="Delete route">✕</button>
+        <button class="btn-delete-route" data-id="${r.id}" title="${r._bookmarked ? 'Remove bookmark' : 'Delete route'}">✕</button>
       </div>
     </div>
   `).join('');
@@ -1660,6 +1725,14 @@ function renderSavedRoutes() {
     });
   });
 }
+
+// Route library tab switching
+document.querySelectorAll('.route-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    state.activeRouteTab = btn.dataset.tab;
+    renderSavedRoutes();
+  });
+});
 
 async function deleteRoute(id) {
   state.savedRoutes = state.savedRoutes.filter(r => r.id !== id);
