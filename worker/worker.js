@@ -21,6 +21,9 @@
  *   GET    /username/:username     — Look up a token by username
  *   DELETE /username/:username     — Remove a username mapping (own token only)
  *   POST   /notify/:targetToken    — Write a mention notification to another user's KV space
+ *   GET    /public/entries         — List recent public entries (optional ?bbox=minLat,minLng,maxLat,maxLng)
+ *   PUT    /public/entries/:id     — Index a public entry (called by owner on save)
+ *   DELETE /public/entries/:id     — Remove entry from public index (on delete or visibility change)
  */
 
 // ---------------------------------------------------------------------------
@@ -86,6 +89,10 @@ export default {
 
       if (pathname.startsWith("/notify/") && request.method === "POST") {
         return await handleNotify(request, env, pathname);
+      }
+
+      if (pathname.startsWith("/public/entries")) {
+        return await handlePublicEntries(request, env, pathname, url);
       }
 
       return errorResponse(404, "Not found");
@@ -444,6 +451,106 @@ async function handleNotify(request, env, pathname) {
   });
 
   return jsonResponse({ ok: true }, request);
+}
+
+// ---------------------------------------------------------------------------
+// Public route discovery
+// ---------------------------------------------------------------------------
+
+async function handlePublicEntries(request, env, pathname, url) {
+  if (!env.WALK_JOURNAL_KV) return errorResponse(500, "KV namespace not configured");
+
+  const parts = pathname.split("/").filter(Boolean); // ["public", "entries"] or ["public", "entries", id]
+  const entryId = parts[2] || null;
+
+  // GET /public/entries — list public entries, optional bbox filter
+  if (request.method === "GET" && !entryId) {
+    const bbox = url.searchParams.get("bbox"); // "minLat,minLng,maxLat,maxLng"
+    let bboxFilter = null;
+    if (bbox) {
+      const [minLat, minLng, maxLat, maxLng] = bbox.split(",").map(Number);
+      if ([minLat, minLng, maxLat, maxLng].every(n => !isNaN(n))) {
+        bboxFilter = { minLat, minLng, maxLat, maxLng };
+      }
+    }
+
+    const list = await env.WALK_JOURNAL_KV.list({ prefix: "public:entry/" });
+    const entries = [];
+
+    for (const k of list.keys) {
+      try {
+        const raw = await env.WALK_JOURNAL_KV.get(k.name, { type: "text" });
+        if (!raw) continue;
+        const entry = JSON.parse(raw);
+
+        // Bbox filter — check if any waypoint falls within bounds
+        if (bboxFilter && entry.waypoints && entry.waypoints.length > 0) {
+          const inBounds = entry.waypoints.some(wp =>
+            wp.lat >= bboxFilter.minLat && wp.lat <= bboxFilter.maxLat &&
+            wp.lng >= bboxFilter.minLng && wp.lng <= bboxFilter.maxLng
+          );
+          if (!inBounds) continue;
+        }
+
+        entries.push(entry);
+      } catch { /* skip malformed entries */ }
+    }
+
+    // Sort by most recent
+    entries.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
+
+    return jsonResponse({ entries: entries.slice(0, 100) }, request);
+  }
+
+  // PUT /public/entries/:id — index a public entry (owner only)
+  if (request.method === "PUT" && entryId) {
+    const body = await readBody(request);
+    if (!body) return errorResponse(400, "Invalid or oversized request body");
+
+    const { token, username, name, distMeters, datetime, waypoints } = body;
+    if (!token || !username || !entryId) {
+      return errorResponse(400, "token, username, and entry data are required");
+    }
+
+    // Verify token owns this entry key
+    const entryKey = `user:${token}:entry/${entryId}`;
+    const existing = await env.WALK_JOURNAL_KV.get(entryKey, { type: "text" });
+    if (!existing) return errorResponse(403, "Entry not found or token mismatch");
+
+    const publicEntry = {
+      id: entryId,
+      token,
+      username,
+      name:       name || null,
+      distMeters: distMeters || 0,
+      datetime:   datetime || new Date().toISOString(),
+      waypoints:  (waypoints || []).slice(0, 500), // cap waypoints
+    };
+
+    await env.WALK_JOURNAL_KV.put(
+      `public:entry/${entryId}`,
+      JSON.stringify(publicEntry),
+      { expirationTtl: KV_TTL }
+    );
+
+    return jsonResponse({ ok: true }, request);
+  }
+
+  // DELETE /public/entries/:id — remove from public index (owner only)
+  if (request.method === "DELETE" && entryId) {
+    const body = await readBody(request);
+    if (!body?.token) return errorResponse(400, "token is required");
+
+    // Verify ownership
+    const entryKey = `user:${body.token}:entry/${entryId}`;
+    const existing = await env.WALK_JOURNAL_KV.get(entryKey, { type: "text" });
+    if (!existing) return errorResponse(403, "Entry not found or token mismatch");
+
+    await env.WALK_JOURNAL_KV.delete(`public:entry/${entryId}`);
+    return jsonResponse({ ok: true }, request);
+  }
+
+  return errorResponse(405, "Method not allowed");
 }
 
 // ---------------------------------------------------------------------------
