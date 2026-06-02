@@ -67,6 +67,8 @@ const state = {
   viewMap:     null,     // read-only view modal map
   activeRouteTab: 'my-routes', // 'my-routes' | 'bookmarked'
   prefillSourceRef: null,      // { entryId, friendToken, username } when using a friend's route
+  mentionEntries:  [],          // mention notifications fetched from KV
+  mentionCache:    {},          // { username: { token, found } } to avoid re-lookups
   // Social
   username:    null,     // this user's chosen username
   friends:     [],       // [{username, token}] confirmed friends
@@ -424,6 +426,203 @@ async function lookupUsername(username) {
   if (!res.ok) throw new Error('Lookup failed');
   return res.json(); // { token, username }
 }
+
+// ─── Mentions ─────────────────────────────────────────────────────
+
+// Load mention notifications from this user's own KV
+async function loadMentionEntries() {
+  state.mentionEntries = [];
+  if (!state.workerUrl || !state.token) return;
+  try {
+    const data = await workerFetch(`/storage/${state.token}`);
+    const keys = (data.keys || []).filter(k => k.key.startsWith('mention/'));
+    const mentions = await Promise.all(
+      keys.map(k =>
+        workerFetch(`/storage/${state.token}/${k.key}`)
+          .then(d => d.value)
+          .catch(() => null)
+      )
+    );
+    state.mentionEntries = mentions.filter(Boolean).map(m => ({
+      ...m,
+      _isMention: true,
+    }));
+  } catch(e) {
+    console.warn('Could not load mention entries:', e.message);
+  }
+}
+
+// Send a mention notification to a tagged user's KV space
+async function sendMentionNotification(targetToken, entryId, preview) {
+  if (!state.workerUrl || !state.username) return;
+  try {
+    const url = state.workerUrl.replace(/\/$/, '') + `/notify/${encodeURIComponent(targetToken)}`;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        entryId,
+        fromUsername: state.username,
+        fromToken:    state.token,
+        preview,
+      }),
+    });
+  } catch(e) {
+    console.warn('Mention notification failed:', e.message);
+  }
+}
+
+// Parse @mentions from text — returns array of lowercase usernames
+function parseMentions(text) {
+  const matches = text.match(/@([a-zA-Z0-9_-]{3,32})/g) || [];
+  return [...new Set(matches.map(m => m.slice(1).toLowerCase()))];
+}
+
+// ─── Mention autocomplete ─────────────────────────────────────────
+
+(function initMentionAutocomplete() {
+  const textarea = document.getElementById('journey-notes');
+  const dropdown = document.getElementById('mention-dropdown');
+  let mentionStart = -1;
+  let currentQuery = '';
+  let lookupTimer  = null;
+  let options      = [];
+  let activeIdx    = -1;
+
+  function hideDrop() {
+    dropdown.style.display = 'none';
+    options = [];
+    activeIdx = -1;
+    mentionStart = -1;
+    currentQuery = '';
+  }
+
+  function showDrop(items) {
+    if (!items.length) { hideDrop(); return; }
+    options = items;
+    activeIdx = 0;
+    dropdown.innerHTML = items.map((item, i) => `
+      <div class="mention-option${i === 0 ? ' active' : ''}" data-idx="${i}">
+        <span class="mention-at">@${escapeHtml(item.username)}</span>
+        ${item.isFriend ? '<span class="mention-status">friend</span>' : ''}
+      </div>
+    `).join('');
+    dropdown.querySelectorAll('.mention-option').forEach(el => {
+      el.addEventListener('mousedown', e => {
+        e.preventDefault();
+        selectOption(parseInt(el.dataset.idx));
+      });
+    });
+
+    // Position below the textarea cursor (approximate)
+    const rect = textarea.getBoundingClientRect();
+    const parentRect = textarea.parentElement.getBoundingClientRect();
+    dropdown.style.display = 'block';
+    dropdown.style.top  = (rect.bottom - parentRect.top + 4) + 'px';
+    dropdown.style.left = '0';
+  }
+
+  function selectOption(idx) {
+    const item = options[idx];
+    if (!item) return;
+    const val    = textarea.value;
+    const before = val.slice(0, mentionStart);
+    const after  = val.slice(textarea.selectionStart);
+    textarea.value = before + '@' + item.username + ' ' + after;
+    // Move cursor after inserted mention
+    const pos = (before + '@' + item.username + ' ').length;
+    textarea.setSelectionRange(pos, pos);
+    hideDrop();
+    textarea.focus();
+    // Cache the resolved user
+    state.mentionCache[item.username.toLowerCase()] = { token: item.token, found: true };
+  }
+
+  textarea.addEventListener('input', () => {
+    const val   = textarea.value;
+    const caret = textarea.selectionStart;
+
+    // Find the @ that precedes the caret
+    let atPos = -1;
+    for (let i = caret - 1; i >= 0; i--) {
+      if (val[i] === '@') { atPos = i; break; }
+      if (val[i] === ' ' || val[i] === '\n') break;
+    }
+
+    if (atPos === -1) { hideDrop(); return; }
+
+    const query = val.slice(atPos + 1, caret);
+    if (!/^[a-zA-Z0-9_-]{0,32}$/.test(query)) { hideDrop(); return; }
+
+    mentionStart  = atPos;
+    currentQuery  = query;
+
+    if (query.length < 1) { hideDrop(); return; }
+
+    clearTimeout(lookupTimer);
+    lookupTimer = setTimeout(async () => {
+      if (!state.workerUrl) return;
+
+      // Check friends first (instant)
+      const friendMatches = state.friends
+        .filter(f => f.username.toLowerCase().startsWith(query.toLowerCase()))
+        .map(f => ({ username: f.username, token: f.token, isFriend: true }));
+
+      // If we have a friend match, show immediately; also do a remote lookup
+      if (friendMatches.length) showDrop(friendMatches);
+
+      // Remote lookup for exact match
+      try {
+        const cached = state.mentionCache[query.toLowerCase()];
+        if (cached) {
+          if (cached.found) {
+            const exists = friendMatches.find(f => f.username.toLowerCase() === query.toLowerCase());
+            if (!exists) showDrop([...friendMatches, { username: query, token: cached.token, isFriend: false }]);
+          }
+          return;
+        }
+        const result = await lookupUsername(query);
+        if (result && query === currentQuery) {
+          state.mentionCache[query.toLowerCase()] = { token: result.token, found: true };
+          const exists = friendMatches.find(f => f.username.toLowerCase() === result.username.toLowerCase());
+          if (!exists) showDrop([...friendMatches, { username: result.username, token: result.token, isFriend: false }]);
+          else showDrop(friendMatches);
+        } else if (!result) {
+          state.mentionCache[query.toLowerCase()] = { token: null, found: false };
+          if (friendMatches.length) showDrop(friendMatches);
+          else hideDrop();
+        }
+      } catch(e) {
+        if (friendMatches.length) showDrop(friendMatches);
+      }
+    }, 300);
+  });
+
+  textarea.addEventListener('keydown', e => {
+    if (dropdown.style.display === 'none') return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, options.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      selectOption(activeIdx);
+      return;
+    } else if (e.key === 'Escape') {
+      hideDrop();
+      return;
+    }
+    dropdown.querySelectorAll('.mention-option').forEach((el, i) => {
+      el.classList.toggle('active', i === activeIdx);
+    });
+  });
+
+  textarea.addEventListener('blur', () => {
+    setTimeout(hideDrop, 150);
+  });
+})();
 
 // Send a friend request to another user
 async function sendFriendRequest(friendUsername, friendToken) {
@@ -1188,7 +1387,29 @@ document.getElementById('btn-save-journey').addEventListener('click', async () =
     connections:  [],
     // Route attribution
     _sourceRouteRef: state.prefillSourceRef || null,
+    // Mentions — resolved below
+    mentions: [],
   };
+
+  // Resolve @mentions and store them on the entry
+  const mentionedNames = parseMentions(entry.notes);
+  if (mentionedNames.length && state.workerUrl) {
+    const resolved = await Promise.all(
+      mentionedNames.map(async uname => {
+        const cached = state.mentionCache[uname];
+        if (cached) return cached.found ? { username: uname, token: cached.token } : null;
+        try {
+          const result = await lookupUsername(uname);
+          if (result) {
+            state.mentionCache[uname] = { token: result.token, found: true };
+            return { username: result.username, token: result.token };
+          }
+        } catch(e) {}
+        return null;
+      })
+    );
+    entry.mentions = resolved.filter(Boolean);
+  }
 
   // Save route if requested
   if (document.getElementById('journey-save-route').checked && state.waypoints.length >= 2) {
@@ -1206,6 +1427,17 @@ document.getElementById('btn-save-journey').addEventListener('click', async () =
   }
 
   await saveEntry(entry);
+
+  // Send mention notifications (fire and forget — don't block UI)
+  if (entry.mentions && entry.mentions.length) {
+    const preview = (entry.name ? entry.name + ': ' : '') + (entry.notes || '').slice(0, 120);
+    for (const m of entry.mentions) {
+      if (m.token !== state.token) {
+        sendMentionNotification(m.token, entry.id, preview);
+      }
+    }
+  }
+
   renderFeed();
   renderSpotlight();
   closeModal('modal-journey');
@@ -1308,7 +1540,7 @@ function renderFeed() {
   const pager  = document.getElementById('pagination');
   const all    = filteredEntries();
 
-  if (all.length === 0) {
+  if (all.length === 0 && state.mentionEntries.length === 0) {
     feed.innerHTML = '';
     if (empty) {
       empty.style.display = 'block';
@@ -1323,7 +1555,7 @@ function renderFeed() {
   if (emptyEl) emptyEl.style.display = 'none';
 
   const totalPages = Math.ceil(all.length / state.pageSize);
-  if (state.currentPage > totalPages) state.currentPage = totalPages;
+  if (state.currentPage > totalPages) state.currentPage = Math.max(1, totalPages);
 
   const start   = (state.currentPage - 1) * state.pageSize;
   const pageItems = all.slice(start, start + state.pageSize);
@@ -1333,6 +1565,18 @@ function renderFeed() {
     const card = buildEntryCard(entry, i);
     feed.appendChild(card);
   });
+
+  // Mention entries — always shown below the main feed, no pagination
+  if (state.mentionEntries.length > 0) {
+    const header = document.createElement('div');
+    header.className = 'mentions-section-header';
+    header.textContent = `You were mentioned (${state.mentionEntries.length})`;
+    feed.appendChild(header);
+    state.mentionEntries.forEach((m, i) => {
+      const card = buildMentionCard(m, i);
+      feed.appendChild(card);
+    });
+  }
 
   renderPagination(totalPages);
 }
@@ -1369,6 +1613,23 @@ function buildEntryCard(entry, animIdx) {
   `;
 
   card.addEventListener('click', () => openViewModal(entry));
+  return card;
+}
+
+function buildMentionCard(mention, animIdx) {
+  const card = document.createElement('div');
+  card.className = 'entry-card type-mention';
+  card.style.animationDelay = `${animIdx * 0.04}s`;
+  card.innerHTML = `
+    <div class="entry-card-header">
+      <div class="entry-card-title">Mentioned by @${escapeHtml(mention.fromUsername)}</div>
+      <div class="entry-card-date">${formatDate(mention.createdAt)}</div>
+    </div>
+    <div class="entry-card-meta">
+      <span class="tag tag-mention-feed">💬 Mention</span>
+    </div>
+    ${mention.preview ? `<div class="entry-card-excerpt">${escapeHtml(mention.preview)}</div>` : ''}
+  `;
   return card;
 }
 
@@ -1862,6 +2123,7 @@ document.getElementById('btn-import-token').addEventListener('click', () => {
     saveSettings(); // persist downloaded profile to localStorage cache
     loadEntries().then(async () => {
       await loadFriendEntries();
+      await loadMentionEntries();
       renderFeed();
       renderSpotlight();
       renderSavedRoutes();
@@ -1948,6 +2210,7 @@ document.getElementById('btn-save-settings').addEventListener('click', async () 
       saveSettings();
       await loadEntries();
       await loadFriendEntries();
+      await loadMentionEntries();
       renderFeed();
       renderSpotlight();
       renderSavedRoutes();
@@ -2262,6 +2525,7 @@ function renderRequestsPanels() {
         btn.textContent = 'Adding…';
         await confirmFriendship(req);
         await loadFriendEntries();
+        await loadMentionEntries();
         renderFriendsModal();
         renderFeed();
         showToast(`@${req.username} added as a friend ✓`);
@@ -2366,6 +2630,7 @@ async function doFriendSearch() {
         const res = await sendFriendRequest(result.username, result.token);
         if (res.autoConfirmed) {
           await loadFriendEntries();
+          await loadMentionEntries();
           renderFriendsModal();
           renderFeed();
           showToast(`@${result.username} added — mutual request detected ✓`);
@@ -2414,6 +2679,7 @@ async function init() {
 
   await loadEntries();
   await loadFriendEntries();
+  await loadMentionEntries();
 
   renderFeed();
   renderSpotlight();
