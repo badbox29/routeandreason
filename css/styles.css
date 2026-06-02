@@ -1375,6 +1375,17 @@ a:hover { text-decoration: underline; }
 /* ── Friend feed entries (terracotta accent) ─────────────────────── */
 .entry-card.type-friend { border-left: 3px solid #e05c3a; }
 .tag-friend { background: #fce8e1; color: #8b2a10; }
+.tag-route-ref { background: var(--green-pale); color: var(--green-dark); font-style: italic; }
+
+/* ── Route attribution ───────────────────────────────────────────── */
+.route-walked-by {
+  font-size: 0.8rem;
+  color: var(--green-mid);
+  padding: 0.4rem 0.6rem;
+  background: var(--green-pale);
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.75rem;
+}
 
 .entry-new-dot {
   display: inline-block;
