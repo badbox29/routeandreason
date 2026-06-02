@@ -1607,3 +1607,16 @@ body.dark .tag-journal {
   background: rgba(200,136,42,0.20);
   color: #d4a460;
 }
+
+/* Spotlight card stays dark-green in both modes — pin text to light values */
+body.dark .spotlight-content,
+body.dark .spotlight-entry-name {
+  color: #f0ece4;
+}
+body.dark .spotlight-label,
+body.dark .spotlight-entry-meta {
+  color: #9dc9a8;
+}
+body.dark .spotlight-entry-excerpt {
+  color: rgba(240,236,228,0.75);
+}
