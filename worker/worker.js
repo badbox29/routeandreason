@@ -20,6 +20,7 @@
  *   PUT    /username/:username     — Register a username → token mapping
  *   GET    /username/:username     — Look up a token by username
  *   DELETE /username/:username     — Remove a username mapping (own token only)
+ *   POST   /notify/:targetToken    — Write a mention notification to another user's KV space
  */
 
 // ---------------------------------------------------------------------------
@@ -81,6 +82,10 @@ export default {
 
       if (pathname.startsWith("/username/")) {
         return await handleUsername(request, env, pathname);
+      }
+
+      if (pathname.startsWith("/notify/") && request.method === "POST") {
+        return await handleNotify(request, env, pathname);
       }
 
       return errorResponse(404, "Not found");
@@ -391,6 +396,53 @@ async function kvPut(kvKey, request, env) {
 
 async function kvDelete(kvKey, env, request) {
   await env.WALK_JOURNAL_KV.delete(kvKey);
+  return jsonResponse({ ok: true }, request);
+}
+
+// ---------------------------------------------------------------------------
+// Mention notifications
+// ---------------------------------------------------------------------------
+
+async function handleNotify(request, env, pathname) {
+  if (!env.WALK_JOURNAL_KV) return errorResponse(500, "KV namespace not configured");
+
+  const parts = pathname.split("/").filter(Boolean); // ["notify", targetToken]
+  if (parts.length < 2) return errorResponse(400, "Target token required");
+
+  const targetToken = parts[1];
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(targetToken)) {
+    return errorResponse(400, "Invalid token format");
+  }
+
+  const body = await readBody(request);
+  if (!body) return errorResponse(400, "Invalid or oversized request body");
+
+  const { entryId, fromUsername, fromToken, preview } = body;
+  if (!entryId || !fromUsername || !fromToken) {
+    return errorResponse(400, "entryId, fromUsername, and fromToken are required");
+  }
+
+  // Validate fromToken maps to fromUsername (prevent spoofing)
+  const reverseKey = "token_username:" + fromToken;
+  const storedUsername = await env.WALK_JOURNAL_KV.get(reverseKey, { type: "text" });
+  if (!storedUsername || storedUsername.toLowerCase() !== fromUsername.toLowerCase()) {
+    return errorResponse(403, "fromToken does not match fromUsername");
+  }
+
+  // Write mention notification to target user's KV space
+  const kvKey = `user:${targetToken}:mention/${entryId}`;
+  const notification = {
+    entryId,
+    fromUsername,
+    fromToken,
+    preview: (preview || "").slice(0, 200),
+    createdAt: new Date().toISOString(),
+  };
+
+  await env.WALK_JOURNAL_KV.put(kvKey, JSON.stringify(notification), {
+    expirationTtl: KV_TTL,
+  });
+
   return jsonResponse({ ok: true }, request);
 }
 
