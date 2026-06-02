@@ -65,6 +65,7 @@ const state = {
   editingId:   null,     // entry id being edited
   suppressRouteUpdate: false, // true while bulk-loading waypoints for edit
   viewMap:     null,     // read-only view modal map
+  discoverMap: null,     // discover modal map
   activeRouteTab: 'my-routes', // 'my-routes' | 'bookmarked'
   prefillSourceRef: null,      // { entryId, friendToken, username } when using a friend's route
   mentionEntries:  [],          // mention notifications fetched from KV
@@ -384,7 +385,7 @@ async function loadFriendEntries() {
 
       const visible = entries
         .filter(Boolean)
-        .filter(e => e.visibility === 'friends')
+        .filter(e => e.visibility === 'friends' || e.visibility === 'public')
         .map(e => ({
           ...e,
           _isFriend: true,
@@ -804,6 +805,35 @@ async function saveEntry(entry) {
     } catch(e) {
       console.warn('Worker save failed, entry kept in local cache:', e.message);
     }
+
+    // Sync public discovery index
+    try {
+      if (entry.visibility === 'public' && entry.type === 'journey' && state.username) {
+        const url = state.workerUrl.replace(/\/$/, '') + `/public/entries/${entry.id}`;
+        await fetch(url, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token:      state.token,
+            username:   state.username,
+            name:       entry.name,
+            distMeters: entry.distMeters,
+            datetime:   entry.datetime,
+            waypoints:  entry.waypoints,
+          }),
+        });
+      } else {
+        // Remove from public index if visibility changed away from public
+        const url = state.workerUrl.replace(/\/$/, '') + `/public/entries/${entry.id}`;
+        await fetch(url, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: state.token }),
+        }).catch(() => {}); // silent fail — may not exist in index
+      }
+    } catch(e) {
+      console.warn('Public index sync failed:', e.message);
+    }
   }
   localStorage.setItem('wj_entries', JSON.stringify(state.entries));
 }
@@ -820,6 +850,15 @@ async function deleteEntry(id) {
     } catch(e) {
       console.warn('Worker delete failed:', e.message);
     }
+    // Remove from public index (silent — may not exist)
+    try {
+      const url = state.workerUrl.replace(/\/$/, '') + `/public/entries/${id}`;
+      await fetch(url, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: state.token }),
+      });
+    } catch(e) {}
   }
 }
 
@@ -1522,6 +1561,141 @@ document.getElementById('btn-settings').addEventListener('click', () => {
   openModal('modal-settings');
 });
 
+// ─── Discover Modal ───────────────────────────────────────────────
+
+document.getElementById('btn-discover').addEventListener('click', () => {
+  openModal('modal-discover');
+});
+
+document.querySelector('#modal-discover [data-close]').addEventListener('click', () => {
+  closeModal('modal-discover');
+  if (state.discoverMap) { state.discoverMap.remove(); state.discoverMap = null; }
+});
+
+document.getElementById('btn-discover-search').addEventListener('click', () => {
+  const q = document.getElementById('discover-location').value.trim();
+  if (!q) return;
+  searchDiscoverByLocation(q);
+});
+
+document.getElementById('discover-location').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('btn-discover-search').click();
+});
+
+document.getElementById('btn-discover-near-me').addEventListener('click', () => {
+  if (!navigator.geolocation) { showToast('Geolocation not supported'); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => fetchPublicRoutes(pos.coords.latitude, pos.coords.longitude, 0.5),
+    ()  => showToast('Could not get your location')
+  );
+});
+
+async function searchDiscoverByLocation(query) {
+  const btn = document.getElementById('btn-discover-search');
+  btn.disabled = true;
+  btn.textContent = 'Searching…';
+  try {
+    const res  = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+    const data = await res.json();
+    if (!data[0]) { showToast('Location not found'); return; }
+    await fetchPublicRoutes(parseFloat(data[0].lat), parseFloat(data[0].lon), 0.5);
+  } catch(e) {
+    showToast('Search failed');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Search';
+  }
+}
+
+async function fetchPublicRoutes(lat, lng, radiusDeg = 0.5) {
+  if (!state.workerUrl) { showToast('Worker URL required for route discovery'); return; }
+
+  const resultsEl = document.getElementById('discover-results');
+  resultsEl.innerHTML = '<div class="widget-empty">Loading…</div>';
+
+  const bbox = `${lat - radiusDeg},${lng - radiusDeg},${lat + radiusDeg},${lng + radiusDeg}`;
+  try {
+    const url  = state.workerUrl.replace(/\/$/, '') + `/public/entries?bbox=${encodeURIComponent(bbox)}`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    renderDiscoverResults(data.entries || [], lat, lng);
+  } catch(e) {
+    resultsEl.innerHTML = '<div class="widget-empty">Failed to load routes. Check your Worker URL in settings.</div>';
+  }
+}
+
+function renderDiscoverResults(entries, centerLat, centerLng) {
+  const resultsEl = document.getElementById('discover-results');
+  const mapEl     = document.getElementById('discover-map');
+
+  if (entries.length === 0) {
+    mapEl.style.display = 'none';
+    resultsEl.innerHTML = '<div class="widget-empty">No public routes found in this area.</div>';
+    return;
+  }
+
+  // Init or reuse discover map
+  mapEl.style.display = 'block';
+  setTimeout(() => {
+    if (state.discoverMap) { state.discoverMap.remove(); state.discoverMap = null; }
+    const dmap = L.map('discover-map', { zoomControl: true, scrollWheelZoom: false });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      subdomains: 'abcd', maxZoom: 19,
+    }).addTo(dmap);
+
+    const allPoints = [];
+    entries.forEach((entry, i) => {
+      if (entry.waypoints && entry.waypoints.length >= 2) {
+        const latlngs = entry.waypoints.map(w => L.latLng(w.lat, w.lng));
+        L.polyline(latlngs, { color: '#4a7c59', weight: 3, opacity: 0.7 }).addTo(dmap);
+        allPoints.push(...latlngs);
+      }
+    });
+
+    if (allPoints.length > 0) {
+      dmap.fitBounds(L.latLngBounds(allPoints), { padding: [20, 20] });
+    } else {
+      dmap.setView([centerLat, centerLng], 13);
+    }
+    state.discoverMap = dmap;
+  }, 50);
+
+  // Results list
+  resultsEl.innerHTML = entries.map(entry => `
+    <div class="discover-result-item">
+      <div class="discover-result-info">
+        <div class="discover-result-name">${escapeHtml(entry.name || 'Untitled Route')}</div>
+        <div class="discover-result-meta">
+          by @${escapeHtml(entry.username)} · ${formatDistance(entry.distMeters)} · ${formatDate(entry.datetime)}
+        </div>
+      </div>
+      <div class="discover-result-actions">
+        ${entry.waypoints && entry.waypoints.length >= 2
+          ? `<button class="btn-load-route btn-use-public-route" data-id="${escapeHtml(entry.id)}" data-username="${escapeHtml(entry.username)}">Use Route</button>`
+          : ''}
+      </div>
+    </div>
+  `).join('');
+
+  // Wire up Use Route buttons
+  resultsEl.querySelectorAll('.btn-use-public-route').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const entry = entries.find(e => e.id === btn.dataset.id);
+      if (!entry || !entry.waypoints) return;
+      closeModal('modal-discover');
+      if (state.discoverMap) { state.discoverMap.remove(); state.discoverMap = null; }
+      openJourneyModal({
+        waypoints:      entry.waypoints,
+        distMeters:     entry.distMeters,
+        _sourceEntryId: entry.id,
+        _fromUsername:  entry.username,
+        _friendToken:   entry.token,
+      });
+    });
+  });
+}
+
 // ─── Feed Rendering ───────────────────────────────────────────────
 
 function filteredEntries() {
@@ -1601,6 +1775,7 @@ function buildEntryCard(entry, animIdx) {
   if (!entry.energyStart && entry.energy) tags.push(`<span class="tag tag-mood">${energyLabel(entry.energy)}</span>`);
   if (entry.weather)     tags.push(`<span class="tag tag-weather">${weatherLabel(entry.weather)}</span>`);
   if (entry.distMeters > 0) tags.push(`<span class="tag tag-distance">${formatDistance(entry.distMeters)}</span>`);
+  if (entry.visibility === 'public') tags.push(`<span class="tag tag-public">🌍 Public</span>`);
 
   const newDot = (entry._isNew && isFriend) ? '<span class="entry-new-dot" title="New"></span>' : '';
   card.innerHTML = `
