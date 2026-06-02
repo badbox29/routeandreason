@@ -1005,6 +1005,12 @@ document.getElementById('btn-clear-route').addEventListener('click', () => {
   clearRoute();
 });
 
+// Show/hide route name input when save-route checkbox is toggled
+document.getElementById('journey-save-route').addEventListener('change', function () {
+  document.getElementById('route-name-group').style.display = this.checked ? 'block' : 'none';
+  if (!this.checked) document.getElementById('journey-route-name').value = '';
+});
+
 // Toggle listeners
 ['toggle-snap','toggle-elevation','toggle-slope'].forEach(id => {
   document.getElementById(id).addEventListener('change', () => {
@@ -1171,9 +1177,11 @@ document.getElementById('btn-save-journey').addEventListener('click', async () =
 
   // Save route if requested
   if (document.getElementById('journey-save-route').checked && state.waypoints.length >= 2) {
+    const routeNameRaw = document.getElementById('journey-route-name').value.trim();
+    const routeName    = routeNameRaw || `Route ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
     const route = {
       id:        crypto.randomUUID(),
-      name,
+      name:      routeName,
       waypoints: entry.waypoints,
       distMeters,
       createdAt: new Date().toISOString(),
@@ -1204,6 +1212,8 @@ function resetJourneyForm() {
   document.getElementById('journey-notes').value        = '';
   document.getElementById('journey-weight').value       = '';
   document.getElementById('journey-save-route').checked = false;
+  document.getElementById('journey-route-name').value   = '';
+  document.getElementById('route-name-group').style.display = 'none';
   clearRoute();
 }
 
