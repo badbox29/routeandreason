@@ -103,11 +103,13 @@
       <!-- Saved Routes Widget -->
       <section class="widget routes-widget">
         <div class="widget-header">
-          <h3 class="widget-title">Saved Routes</h3>
+          <h3 class="widget-title">Route Library</h3>
         </div>
-        <div id="saved-routes-list">
-          <div class="widget-empty">Save a route while logging a journey to see it here.</div>
+        <div class="route-library-tabs">
+          <button class="route-tab active" data-tab="my-routes">My Routes</button>
+          <button class="route-tab" data-tab="bookmarked">Bookmarked</button>
         </div>
+        <div id="saved-routes-list"></div>
       </section>
 
     </aside>
@@ -543,6 +545,8 @@
       <div class="modal-header">
         <h2 class="modal-title" id="view-title">Entry</h2>
         <div class="modal-header-actions">
+          <button class="btn btn-sm btn-ghost" id="btn-use-route" style="display:none">Use Route</button>
+          <button class="btn btn-sm btn-ghost" id="btn-bookmark-route" style="display:none">Bookmark</button>
           <button class="btn btn-sm btn-ghost" id="btn-edit-entry">Edit</button>
           <button class="modal-close" data-close="modal-view">✕</button>
         </div>
