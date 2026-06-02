@@ -1620,3 +1620,9 @@ body.dark .spotlight-entry-meta {
 body.dark .spotlight-entry-excerpt {
   color: rgba(240,236,228,0.75);
 }
+
+/* Header stays dark-green in both modes — pin brand text to light values */
+body.dark .brand,
+body.dark .brand-name {
+  color: #f0ece4;
+}
