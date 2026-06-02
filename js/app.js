@@ -66,6 +66,7 @@ const state = {
   suppressRouteUpdate: false, // true while bulk-loading waypoints for edit
   viewMap:     null,     // read-only view modal map
   activeRouteTab: 'my-routes', // 'my-routes' | 'bookmarked'
+  prefillSourceRef: null,      // { entryId, friendToken, username } when using a friend's route
   // Social
   username:    null,     // this user's chosen username
   friends:     [],       // [{username, token}] confirmed friends
@@ -959,6 +960,9 @@ function updateStats(distMeters) {
 function openJourneyModal(prefillRoute = null, isEditing = false) {
   openModal('modal-journey');
 
+  // Clear any prior source ref
+  state.prefillSourceRef = null;
+
   // Init map after modal is visible
   setTimeout(() => {
     initMap();
@@ -970,6 +974,14 @@ function openJourneyModal(prefillRoute = null, isEditing = false) {
       if (state.waypoints.length > 1) {
         const bounds = L.latLngBounds(state.waypoints);
         state.map.fitBounds(bounds, { padding: [30, 30] });
+      }
+      // Store attribution ref if this route came from a friend's entry
+      if (prefillRoute._sourceEntryId) {
+        state.prefillSourceRef = {
+          entryId:     prefillRoute._sourceEntryId,
+          friendToken: prefillRoute._friendToken,
+          username:    prefillRoute._fromUsername,
+        };
       }
     }
   }, 50);
@@ -1174,6 +1186,8 @@ document.getElementById('btn-save-journey').addEventListener('click', async () =
     // Social stub
     userId:       state.token,
     connections:  [],
+    // Route attribution
+    _sourceRouteRef: state.prefillSourceRef || null,
   };
 
   // Save route if requested
@@ -1215,6 +1229,7 @@ function resetJourneyForm() {
   document.getElementById('journey-save-route').checked = false;
   document.getElementById('journey-route-name').value   = '';
   document.getElementById('route-name-group').style.display = 'none';
+  state.prefillSourceRef = null;
   clearRoute();
 }
 
@@ -1470,6 +1485,7 @@ function openViewModal(entry) {
   if (entry.weather)     tags.push(`<span class="tag tag-weather">${weatherLabel(entry.weather)}</span>`);
   if (entry.temp)        tags.push(`<span class="tag tag-weather">${entry.temp}°F</span>`);
   if (entry.companions)  tags.push(`<span class="tag tag-journey">With ${escapeHtml(entry.companions)}</span>`);
+  if (entry._sourceRouteRef?.username) tags.push(`<span class="tag tag-route-ref">Route by @${escapeHtml(entry._sourceRouteRef.username)}</span>`);
 
   let statsHtml = '';
   if (entry.type === 'journey' && entry.distMeters > 0) {
@@ -1490,12 +1506,29 @@ function openViewModal(entry) {
     mapHtml = `<div id="view-map"></div>`;
   }
 
+  // Route attribution count
+  let attributionHtml = '';
+  if (entry.type === 'journey' && mapPoints && mapPoints.length >= 2) {
+    const allEntries = [...state.entries, ...state.friendEntries];
+    const walkerCount = allEntries.filter(
+      e => e._sourceRouteRef && e._sourceRouteRef.entryId === entry.id && e.id !== entry.id
+    ).length;
+    if (walkerCount > 0) {
+      attributionHtml = `
+        <div class="route-walked-by">
+          🥾 ${walkerCount} ${walkerCount === 1 ? 'person has' : 'people have'} walked this route
+        </div>
+      `;
+    }
+  }
+
   body.innerHTML = `
     <div class="view-entry-meta">
       <span class="tag tag-${entry.type}">${formatDateTime(entry.datetime)}</span>
       ${tags.join('')}
     </div>
     ${statsHtml}
+    ${attributionHtml}
     ${mapHtml}
     ${entry.notes ? `<div class="view-notes">${escapeHtml(entry.notes)}</div>` : ''}
   `;
@@ -1532,7 +1565,13 @@ function openViewModal(entry) {
     useRouteBtn.onclick = () => {
       closeModal('modal-view');
       if (state.viewMap) { state.viewMap.remove(); state.viewMap = null; }
-      openJourneyModal({ waypoints: entry.waypoints, distMeters: entry.distMeters });
+      openJourneyModal({
+        waypoints:      entry.waypoints,
+        distMeters:     entry.distMeters,
+        _sourceEntryId: entry._isFriend ? entry.id : null,
+        _friendToken:   entry._isFriend ? entry._friendToken : null,
+        _fromUsername:  entry._isFriend ? entry._friendUsername : null,
+      });
     };
   } else {
     useRouteBtn.style.display = 'none';
