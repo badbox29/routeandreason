@@ -1376,6 +1376,53 @@ a:hover { text-decoration: underline; }
 .entry-card.type-friend { border-left: 3px solid #e05c3a; }
 .tag-friend { background: #fce8e1; color: #8b2a10; }
 .tag-route-ref { background: var(--green-pale); color: var(--green-dark); font-style: italic; }
+.tag-mention { background: #e8f0fe; color: #1a56b0; }
+
+/* ── Mention autocomplete dropdown ──────────────────────────────── */
+.mention-dropdown {
+  position: absolute;
+  left: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  z-index: 1000;
+  min-width: 180px;
+  max-width: 260px;
+  overflow: hidden;
+}
+
+.mention-option {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  color: var(--ink);
+  transition: background 0.1s;
+}
+
+.mention-option:hover,
+.mention-option.active {
+  background: var(--green-pale);
+  color: var(--green-dark);
+}
+
+.mention-option .mention-at { color: var(--green-mid); font-weight: 500; }
+.mention-option .mention-status { font-size: 0.75rem; color: var(--ink-muted); margin-left: 0.4rem; }
+
+/* ── Mention feed section ────────────────────────────────────────── */
+.mentions-section-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+  padding: 0.5rem 0 0.25rem;
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--border-soft);
+}
+
+.entry-card.type-mention { border-left: 3px solid #1a56b0; }
+.tag-mention-feed { background: #e8f0fe; color: #1a56b0; }
 
 /* ── Route attribution ───────────────────────────────────────────── */
 .route-walked-by {
