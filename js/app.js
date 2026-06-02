@@ -481,9 +481,11 @@ function parseMentions(text) {
 
 // ─── Mention autocomplete ─────────────────────────────────────────
 
-(function initMentionAutocomplete() {
-  const textarea = document.getElementById('journey-notes');
-  const dropdown = document.getElementById('mention-dropdown');
+// ─── Mention / companion autocomplete ────────────────────────────
+// Factory — attach @mention autocomplete to any input/textarea + dropdown pair.
+// onSelect(item) is called after the text is inserted; use it for side effects.
+
+function createMentionAutocomplete(inputEl, dropdownEl, onSelect) {
   let mentionStart = -1;
   let currentQuery = '';
   let lookupTimer  = null;
@@ -491,63 +493,94 @@ function parseMentions(text) {
   let activeIdx    = -1;
 
   function hideDrop() {
-    dropdown.style.display = 'none';
-    options = [];
-    activeIdx = -1;
-    mentionStart = -1;
-    currentQuery = '';
+    dropdownEl.style.display = 'none';
+    options    = [];
+    activeIdx  = -1;
+    mentionStart  = -1;
+    currentQuery  = '';
   }
 
   function showDrop(items) {
     if (!items.length) { hideDrop(); return; }
-    options = items;
+    options   = items;
     activeIdx = 0;
-    dropdown.innerHTML = items.map((item, i) => `
+    dropdownEl.innerHTML = items.map((item, i) => `
       <div class="mention-option${i === 0 ? ' active' : ''}" data-idx="${i}">
         <span class="mention-at">@${escapeHtml(item.username)}</span>
         ${item.isFriend ? '<span class="mention-status">friend</span>' : ''}
       </div>
     `).join('');
-    dropdown.querySelectorAll('.mention-option').forEach(el => {
+    dropdownEl.querySelectorAll('.mention-option').forEach(el => {
       el.addEventListener('mousedown', e => {
         e.preventDefault();
         selectOption(parseInt(el.dataset.idx));
       });
     });
 
-    // Position below the textarea cursor (approximate)
-    const rect = textarea.getBoundingClientRect();
-    const parentRect = textarea.parentElement.getBoundingClientRect();
-    dropdown.style.display = 'block';
-    dropdown.style.top  = (rect.bottom - parentRect.top + 4) + 'px';
-    dropdown.style.left = '0';
+    // Position below the input/textarea
+    const rect       = inputEl.getBoundingClientRect();
+    const parentRect = inputEl.parentElement.getBoundingClientRect();
+    dropdownEl.style.display = 'block';
+    dropdownEl.style.top  = (rect.bottom - parentRect.top + 4) + 'px';
+    dropdownEl.style.left = '0';
   }
 
   function selectOption(idx) {
     const item = options[idx];
     if (!item) return;
-    const val    = textarea.value;
+    const val    = inputEl.value;
     const before = val.slice(0, mentionStart);
-    const after  = val.slice(textarea.selectionStart);
-    textarea.value = before + '@' + item.username + ' ' + after;
-    // Move cursor after inserted mention
+    const after  = val.slice(inputEl.selectionStart);
+    inputEl.value = before + '@' + item.username + (after.startsWith(' ') ? '' : ' ') + after;
     const pos = (before + '@' + item.username + ' ').length;
-    textarea.setSelectionRange(pos, pos);
+    inputEl.setSelectionRange(pos, pos);
     hideDrop();
-    textarea.focus();
-    // Cache the resolved user
+    inputEl.focus();
     state.mentionCache[item.username.toLowerCase()] = { token: item.token, found: true };
+    if (onSelect) onSelect(item);
   }
 
-  textarea.addEventListener('input', () => {
-    const val   = textarea.value;
-    const caret = textarea.selectionStart;
+  async function doLookup(query) {
+    if (!state.workerUrl) return;
 
-    // Find the @ that precedes the caret
+    const friendMatches = state.friends
+      .filter(f => f.username.toLowerCase().startsWith(query.toLowerCase()))
+      .map(f => ({ username: f.username, token: f.token, isFriend: true }));
+
+    if (friendMatches.length) showDrop(friendMatches);
+
+    try {
+      const cached = state.mentionCache[query.toLowerCase()];
+      if (cached) {
+        if (cached.found) {
+          const exists = friendMatches.find(f => f.username.toLowerCase() === query.toLowerCase());
+          if (!exists) showDrop([...friendMatches, { username: query, token: cached.token, isFriend: false }]);
+        }
+        return;
+      }
+      const result = await lookupUsername(query);
+      if (result && query === currentQuery) {
+        state.mentionCache[query.toLowerCase()] = { token: result.token, found: true };
+        const exists = friendMatches.find(f => f.username.toLowerCase() === result.username.toLowerCase());
+        if (!exists) showDrop([...friendMatches, { username: result.username, token: result.token, isFriend: false }]);
+        else showDrop(friendMatches);
+      } else if (!result) {
+        state.mentionCache[query.toLowerCase()] = { token: null, found: false };
+        if (friendMatches.length) showDrop(friendMatches); else hideDrop();
+      }
+    } catch(e) {
+      if (friendMatches.length) showDrop(friendMatches);
+    }
+  }
+
+  inputEl.addEventListener('input', () => {
+    const val   = inputEl.value;
+    const caret = inputEl.selectionStart;
+
     let atPos = -1;
     for (let i = caret - 1; i >= 0; i--) {
       if (val[i] === '@') { atPos = i; break; }
-      if (val[i] === ' ' || val[i] === '\n') break;
+      if (val[i] === ' ' || val[i] === '\n' || val[i] === ',') break;
     }
 
     if (atPos === -1) { hideDrop(); return; }
@@ -555,52 +588,17 @@ function parseMentions(text) {
     const query = val.slice(atPos + 1, caret);
     if (!/^[a-zA-Z0-9_-]{0,32}$/.test(query)) { hideDrop(); return; }
 
-    mentionStart  = atPos;
-    currentQuery  = query;
+    mentionStart = atPos;
+    currentQuery = query;
 
     if (query.length < 1) { hideDrop(); return; }
 
     clearTimeout(lookupTimer);
-    lookupTimer = setTimeout(async () => {
-      if (!state.workerUrl) return;
-
-      // Check friends first (instant)
-      const friendMatches = state.friends
-        .filter(f => f.username.toLowerCase().startsWith(query.toLowerCase()))
-        .map(f => ({ username: f.username, token: f.token, isFriend: true }));
-
-      // If we have a friend match, show immediately; also do a remote lookup
-      if (friendMatches.length) showDrop(friendMatches);
-
-      // Remote lookup for exact match
-      try {
-        const cached = state.mentionCache[query.toLowerCase()];
-        if (cached) {
-          if (cached.found) {
-            const exists = friendMatches.find(f => f.username.toLowerCase() === query.toLowerCase());
-            if (!exists) showDrop([...friendMatches, { username: query, token: cached.token, isFriend: false }]);
-          }
-          return;
-        }
-        const result = await lookupUsername(query);
-        if (result && query === currentQuery) {
-          state.mentionCache[query.toLowerCase()] = { token: result.token, found: true };
-          const exists = friendMatches.find(f => f.username.toLowerCase() === result.username.toLowerCase());
-          if (!exists) showDrop([...friendMatches, { username: result.username, token: result.token, isFriend: false }]);
-          else showDrop(friendMatches);
-        } else if (!result) {
-          state.mentionCache[query.toLowerCase()] = { token: null, found: false };
-          if (friendMatches.length) showDrop(friendMatches);
-          else hideDrop();
-        }
-      } catch(e) {
-        if (friendMatches.length) showDrop(friendMatches);
-      }
-    }, 300);
+    lookupTimer = setTimeout(() => doLookup(query), 300);
   });
 
-  textarea.addEventListener('keydown', e => {
-    if (dropdown.style.display === 'none') return;
+  inputEl.addEventListener('keydown', e => {
+    if (dropdownEl.style.display === 'none') return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       activeIdx = Math.min(activeIdx + 1, options.length - 1);
@@ -612,18 +610,50 @@ function parseMentions(text) {
       selectOption(activeIdx);
       return;
     } else if (e.key === 'Escape') {
-      hideDrop();
-      return;
+      hideDrop(); return;
     }
-    dropdown.querySelectorAll('.mention-option').forEach((el, i) => {
+    dropdownEl.querySelectorAll('.mention-option').forEach((el, i) => {
       el.classList.toggle('active', i === activeIdx);
     });
   });
 
-  textarea.addEventListener('blur', () => {
-    setTimeout(hideDrop, 150);
+  inputEl.addEventListener('blur', () => setTimeout(hideDrop, 150));
+}
+
+// Helper — add a @username to the companions field if not already present
+function addToCompanions(username) {
+  const field = document.getElementById('journey-companions');
+  if (!field) return;
+  const current = field.value;
+  const tag     = '@' + username;
+  // Check if already present (case-insensitive)
+  const parts = current.split(',').map(s => s.trim().toLowerCase());
+  if (parts.includes(tag.toLowerCase())) return;
+  field.value = current ? current.trimEnd().replace(/,\s*$/, '') + ', ' + tag : tag;
+}
+
+// Notes autocomplete — tagging also adds to companions
+createMentionAutocomplete(
+  document.getElementById('journey-notes'),
+  document.getElementById('mention-dropdown'),
+  item => addToCompanions(item.username)
+);
+
+// Companions autocomplete — pure @mention insert, no side effect needed
+createMentionAutocomplete(
+  document.getElementById('journey-companions'),
+  document.getElementById('companions-dropdown'),
+  null
+);
+
+// On notes blur — scan for any @mentions typed without using the dropdown and add to companions
+document.getElementById('journey-notes').addEventListener('blur', () => {
+  const mentions = parseMentions(document.getElementById('journey-notes').value);
+  mentions.forEach(uname => {
+    const cached = state.mentionCache[uname];
+    if (cached && cached.found) addToCompanions(uname);
   });
-})();
+});
 
 // Send a friend request to another user
 async function sendFriendRequest(friendUsername, friendToken) {
