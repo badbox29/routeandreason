@@ -990,6 +990,22 @@ function addWaypoint(latlng) {
   if (!state.suppressRouteUpdate) updateRoute();
 }
 
+// Loop detection — show "Close Loop" button if start and end are within 50m
+function checkLoopDetection() {
+  const btn = document.getElementById('btn-close-loop');
+  if (state.waypoints.length < 3) { btn.style.display = 'none'; return; }
+
+  const start = state.waypoints[0];
+  const end   = state.waypoints[state.waypoints.length - 1];
+  const dist  = start.distanceTo(end); // metres
+
+  // Already a loop (snapped) — hide button
+  if (dist < 1) { btn.style.display = 'none'; return; }
+
+  // Close enough to suggest closing (within 50m)
+  btn.style.display = dist < 50 ? '' : 'none';
+}
+
 function clearMapDrawings() {
   state.polylines.forEach(p => state.map.removeLayer(p));
   state.polylines = [];
@@ -1028,6 +1044,8 @@ async function updateRoute() {
 
   const distMeters = totalDistance(routePoints.map(p => ({ lat: p.lat || p[0], lng: p.lng || p[1] })));
   updateStats(distMeters);
+
+  checkLoopDetection();
 
   if (document.getElementById('toggle-elevation').checked && state.workerUrl) {
     fetchAndDrawElevation(routePoints);
@@ -1208,10 +1226,7 @@ function openJourneyModal(prefillRoute = null, isEditing = false) {
 
     if (prefillRoute) {
       clearRoute();
-      state.suppressRouteUpdate = true;
       prefillRoute.waypoints.forEach(wp => addWaypoint(L.latLng(wp.lat, wp.lng)));
-      state.suppressRouteUpdate = false;
-      if (state.waypoints.length >= 2) updateRoute();
       if (state.waypoints.length > 1) {
         const bounds = L.latLngBounds(state.waypoints);
         state.map.fitBounds(bounds, { padding: [30, 30] });
@@ -1244,6 +1259,7 @@ function clearRoute() {
   clearMapDrawings();
   updateStats(0);
   document.getElementById('elevation-profile').style.display = 'none';
+  document.getElementById('btn-close-loop').style.display = 'none';
   state.elevationData = [];
   state.lastRoutePoints = null;
 }
@@ -1252,6 +1268,42 @@ document.getElementById('btn-undo-waypoint').addEventListener('click', () => {
   if (state.waypoints.length === 0) return;
   state.map.removeLayer(state.markers.pop());
   state.waypoints.pop();
+  updateRoute();
+  checkLoopDetection();
+});
+
+document.getElementById('btn-reverse-route').addEventListener('click', () => {
+  if (state.waypoints.length < 2) return;
+
+  // Reverse both arrays
+  state.waypoints.reverse();
+  state.markers.reverse();
+
+  // Re-apply icons so the start icon follows the new first waypoint
+  state.markers.forEach((marker, i) => {
+    const isFirst = i === 0;
+    marker.setIcon(L.divIcon({
+      className: isFirst ? 'waypoint-start-icon' : 'waypoint-icon',
+      html: `<div></div>`,
+      iconSize:   isFirst ? [14, 14] : [10, 10],
+      iconAnchor: isFirst ? [7, 7]   : [5, 5],
+    }));
+  });
+
+  updateRoute();
+  checkLoopDetection();
+});
+
+document.getElementById('btn-close-loop').addEventListener('click', () => {
+  if (state.waypoints.length < 2) return;
+
+  // Snap last waypoint to exactly match first
+  const start = state.waypoints[0];
+  const lastIdx = state.waypoints.length - 1;
+  state.waypoints[lastIdx] = L.latLng(start.lat, start.lng);
+  state.markers[lastIdx].setLatLng(state.waypoints[lastIdx]);
+
+  document.getElementById('btn-close-loop').style.display = 'none';
   updateRoute();
 });
 
