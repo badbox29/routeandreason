@@ -3010,7 +3010,9 @@ function renderWeatherLocation(data) {
 
 function pollenClassFromCategory(category) {
   if (!category) return 'pollen-vlow';
-  const c = category.toUpperCase();
+  // Google returns "Very Low", "Low", "Moderate", "High", "Very High"
+  // Normalise to uppercase-underscore for comparison
+  const c = category.toUpperCase().replace(/\s+/g, '_');
   if (c === 'NONE' || c === 'VERY_LOW') return 'pollen-vlow';
   if (c === 'LOW')      return 'pollen-low';
   if (c === 'MODERATE') return 'pollen-moderate';
