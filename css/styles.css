@@ -499,10 +499,11 @@ a:hover { text-decoration: underline; }
   font-weight: 600;
 }
 
-.pollen-low    { background: #d4edda; color: #155724; }
-.pollen-moderate { background: #fff3cd; color: #856404; }
-.pollen-high   { background: #f8d7da; color: #721c24; }
-.pollen-vhigh  { background: #f5c6cb; color: #491217; }
+.pollen-vlow   { background: #e8f5e9; color: #2e7d32; }
+.pollen-low    { background: #c8e6c9; color: #1b5e20; }
+.pollen-moderate { background: #fff9c4; color: #f57f17; }
+.pollen-high   { background: #ffe0b2; color: #e65100; }
+.pollen-vhigh  { background: #ffccbc; color: #bf360c; }
 
 .weather-section-divider {
   font-size: 0.7rem;
