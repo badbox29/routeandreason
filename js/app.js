@@ -2937,16 +2937,7 @@ function promptSyncModal(count, unsynced) {
 async function renderWeatherSidebar() {
   const el = document.getElementById('weather-locations');
 
-  // Collect manual + inferred locations
-  const manualLocs = state.weatherLocs.filter(l => l.manual);
-
-  // Infer locations from recent journeys (last 3 unique areas)
-  const inferredLocs = inferLocationsFromEntries();
-
-  const allLocs = [
-    ...manualLocs.map(l => ({ ...l, source: 'manual' })),
-    ...inferredLocs.map(l => ({ ...l, source: 'inferred' })),
-  ];
+  const allLocs = state.weatherLocs.filter(l => l.manual);
 
   if (allLocs.length === 0) {
     el.innerHTML = '<div class="widget-empty">Add a location to see current conditions.</div>';
@@ -2956,39 +2947,7 @@ async function renderWeatherSidebar() {
   el.innerHTML = '<div class="widget-empty">Loading conditions…</div>';
 
   const results = await Promise.all(allLocs.map(loc => fetchWeather(loc)));
-
-  let html = '';
-  const manual   = results.filter(r => r.source === 'manual');
-  const inferred = results.filter(r => r.source === 'inferred');
-
-  if (manual.length > 0) {
-    html += manual.map(renderWeatherLocation).join('');
-  }
-  if (inferred.length > 0) {
-    html += `<div class="weather-section-divider">From recent walks</div>`;
-    html += inferred.map(renderWeatherLocation).join('');
-  }
-
-  el.innerHTML = html;
-}
-
-function inferLocationsFromEntries() {
-  const journeys = state.entries
-    .filter(e => e.type === 'journey' && e.waypoints && e.waypoints.length > 0)
-    .slice(0, 5);
-
-  const seen = new Set();
-  const locs = [];
-  for (const j of journeys) {
-    const wp  = j.waypoints[0];
-    const key = `${wp.lat.toFixed(1)},${wp.lng.toFixed(1)}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      locs.push({ name: j.name || 'Recent walk', lat: wp.lat, lng: wp.lng, manual: false });
-      if (locs.length >= 2) break;
-    }
-  }
-  return locs;
+  el.innerHTML = results.map(renderWeatherLocation).join('');
 }
 
 async function fetchWeather(loc) {
@@ -2997,18 +2956,20 @@ async function fetchWeather(loc) {
       + `&current=temperature_2m,relative_humidity_2m,wind_speed_10m,uv_index,weather_code`
       + `&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto`;
 
-    const airUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${loc.lat}&longitude=${loc.lng}`
-      + `&current=pm10,pm2_5,alder_pollen,birch_pollen,grass_pollen,mugwort_pollen,olive_pollen,ragweed_pollen`
-      + `&timezone=auto`;
+    const wxPromise = fetch(url).then(r => r.json());
 
-    const [wx, air] = await Promise.all([
-      fetch(url).then(r => r.json()),
-      fetch(airUrl).then(r => r.json()).catch(() => null),
-    ]);
+    // Pollen via worker (daily cached) — only if worker URL is configured
+    let pollenPromise = Promise.resolve(null);
+    if (state.workerUrl) {
+      const pollenUrl = state.workerUrl.replace(/\/$/, '')
+        + `/pollen?lat=${loc.lat}&lng=${loc.lng}`;
+      pollenPromise = fetch(pollenUrl).then(r => r.ok ? r.json() : null).catch(() => null);
+    }
 
-    return { ...loc, wx: wx.current, air: air?.current };
+    const [wx, pollen] = await Promise.all([wxPromise, pollenPromise]);
+    return { ...loc, wx: wx.current, pollen };
   } catch(e) {
-    return { ...loc, wx: null, air: null };
+    return { ...loc, wx: null, pollen: null };
   }
 }
 
@@ -3019,16 +2980,16 @@ function renderWeatherLocation(data) {
   const wmoDesc = wmoDescription(wx.weather_code);
 
   let pollenHtml = '';
-  if (data.air) {
+  if (data.pollen) {
     const pollens = [
-      { label: 'Tree', val: Math.max(data.air.alder_pollen||0, data.air.birch_pollen||0, data.air.olive_pollen||0) },
-      { label: 'Grass', val: data.air.grass_pollen || 0 },
-      { label: 'Weed', val: Math.max(data.air.mugwort_pollen||0, data.air.ragweed_pollen||0) },
-    ].filter(p => p.val > 0);
+      { label: 'Tree',  data: data.pollen.tree  },
+      { label: 'Grass', data: data.pollen.grass },
+      { label: 'Weed',  data: data.pollen.weed  },
+    ].filter(p => p.data && p.data.index !== null);
 
     if (pollens.length > 0) {
       pollenHtml = `<div class="pollen-row">${pollens.map(p =>
-        `<span class="pollen-badge ${pollenClass(p.val)}">${p.label}: ${pollenLabel(p.val)}</span>`
+        `<span class="pollen-badge ${pollenClassFromCategory(p.data.category)}">${p.label}: ${p.data.category || '—'}</span>`
       ).join('')}</div>`;
     }
   }
@@ -3047,18 +3008,14 @@ function renderWeatherLocation(data) {
   `;
 }
 
-function pollenClass(val) {
-  if (val < 10)  return 'pollen-low';
-  if (val < 50)  return 'pollen-moderate';
-  if (val < 200) return 'pollen-high';
-  return 'pollen-vhigh';
-}
-
-function pollenLabel(val) {
-  if (val < 10)  return 'Low';
-  if (val < 50)  return 'Mod';
-  if (val < 200) return 'High';
-  return 'V.High';
+function pollenClassFromCategory(category) {
+  if (!category) return 'pollen-low';
+  const c = category.toUpperCase();
+  if (c === 'NONE' || c === 'VERY_LOW') return 'pollen-low';
+  if (c === 'LOW')      return 'pollen-low';
+  if (c === 'MODERATE') return 'pollen-moderate';
+  if (c === 'HIGH')     return 'pollen-high';
+  return 'pollen-vhigh'; // VERY_HIGH
 }
 
 function wmoDescription(code) {
