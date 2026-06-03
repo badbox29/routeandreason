@@ -105,8 +105,8 @@ a:hover { text-decoration: underline; }
 }
 
 .brand-icon-img {
-  width: 28px;
-  height: 28px;
+  width: 42px;
+  height: 42px;
   object-fit: contain;
   filter: brightness(0) invert(1);
   opacity: 0.9;
