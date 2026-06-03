@@ -700,7 +700,7 @@ async function confirmFriendship(req) {
   state.outgoingReqs = state.outgoingReqs.filter(r => r.token !== req.token);
   await saveProfileToKV();
 
-  // Write us to their friends list and clean up their outgoing
+  // Write us to their friends list and clean up their outgoing AND incoming
   try {
     const theirProfile = await workerFetch(`/storage/${req.token}/profile`)
       .then(d => d.value).catch(() => null);
@@ -709,8 +709,10 @@ async function confirmFriendship(req) {
       if (!theirFriends.find(f => f.token === state.token)) {
         theirFriends.push({ username: state.username, token: state.token, since: now });
       }
+      // Clean up their outgoing (they sent to us) and their incoming (we sent to them)
       const theirOutgoing = (theirProfile.outgoingReqs || []).filter(r => r.token !== state.token);
-      const updated = { ...theirProfile, friends: theirFriends, outgoingReqs: theirOutgoing };
+      const theirIncoming = (theirProfile.incomingReqs || []).filter(r => r.token !== state.token);
+      const updated = { ...theirProfile, friends: theirFriends, outgoingReqs: theirOutgoing, incomingReqs: theirIncoming };
       await workerFetch(`/storage/${req.token}/profile`, 'PUT', updated);
     }
   } catch(e) {
