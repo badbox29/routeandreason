@@ -2387,6 +2387,245 @@ function promptDeleteRouteModal(route) {
   openModal('modal-delete-route');
 }
 
+// ─── Stats Dashboard ──────────────────────────────────────────────
+
+let statsWindow = 'week'; // 'week' | 'month' | 'year' | 'all'
+
+document.getElementById('btn-stats').addEventListener('click', () => {
+  openModal('modal-stats');
+  renderStatsDashboard();
+});
+
+document.querySelector('#modal-stats [data-close]').addEventListener('click', () => {
+  closeModal('modal-stats');
+});
+
+document.querySelectorAll('.stats-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    statsWindow = btn.dataset.window;
+    document.querySelectorAll('.stats-tab').forEach(b => b.classList.toggle('active', b === btn));
+    renderStatsDashboard();
+  });
+});
+
+function getWindowEntries() {
+  const journeys = state.entries.filter(e => e.type === 'journey');
+  if (statsWindow === 'all') return journeys;
+  const now  = new Date();
+  const cutoff = new Date();
+  if (statsWindow === 'week') {
+    const day = now.getDay();
+    cutoff.setDate(now.getDate() - day);
+    cutoff.setHours(0, 0, 0, 0);
+  } else if (statsWindow === 'month') {
+    cutoff.setDate(1);
+    cutoff.setHours(0, 0, 0, 0);
+  } else if (statsWindow === 'year') {
+    cutoff.setMonth(0, 1);
+    cutoff.setHours(0, 0, 0, 0);
+  }
+  return journeys.filter(e => new Date(e.datetime) >= cutoff);
+}
+
+function renderStatsDashboard() {
+  const entries  = getWindowEntries();
+  const allJourneys = state.entries.filter(e => e.type === 'journey');
+
+  // ── Summary row ──────────────────────────────────────────────────
+  const totalWalks = entries.length;
+  const totalMiles = entries.reduce((s, e) => s + (e.distMeters || 0), 0) / METERS_PER_MILE;
+  const totalMins  = entries.reduce((s, e) => s + (e.durationMin || 0), 0);
+  const totalCals  = entries.reduce((s, e) => s + (e.calories || 0), 0);
+
+  document.getElementById('stats-summary-row').innerHTML = `
+    <div class="stats-summary-card">
+      <div class="stats-summary-value">${totalWalks}</div>
+      <div class="stats-summary-label">Walks</div>
+    </div>
+    <div class="stats-summary-card">
+      <div class="stats-summary-value">${totalMiles.toFixed(1)}</div>
+      <div class="stats-summary-label">Miles</div>
+    </div>
+    <div class="stats-summary-card">
+      <div class="stats-summary-value">${formatDuration(totalMins)}</div>
+      <div class="stats-summary-label">Time</div>
+    </div>
+    <div class="stats-summary-card">
+      <div class="stats-summary-value">${totalCals > 0 ? Math.round(totalCals).toLocaleString() : '—'}</div>
+      <div class="stats-summary-label">Calories</div>
+    </div>
+  `;
+
+  // ── Weekly miles chart ────────────────────────────────────────────
+  drawWeeklyChart(allJourneys);
+
+  // ── Day of week chart ─────────────────────────────────────────────
+  drawDowChart(entries);
+
+  // ── Personal bests ────────────────────────────────────────────────
+  const bests = document.getElementById('stats-personal-bests');
+  if (allJourneys.length === 0) {
+    bests.innerHTML = '<div class="widget-empty" style="font-size:0.8rem">No journeys logged yet.</div>';
+  } else {
+    const longest  = allJourneys.reduce((a, b) => (b.distMeters||0) > (a.distMeters||0) ? b : a);
+    const longest2 = allJourneys.reduce((a, b) => (b.durationMin||0) > (a.durationMin||0) ? b : a);
+    const fastest  = allJourneys.filter(e => e.distMeters > 0 && e.durationMin > 0)
+      .reduce((a, b) => {
+        const paceA = a ? a.durationMin / (a.distMeters / METERS_PER_MILE) : Infinity;
+        const paceB = b.durationMin / (b.distMeters / METERS_PER_MILE);
+        return paceB < paceA ? b : a;
+      }, null);
+    const mostCals = allJourneys.filter(e => e.calories).reduce((a, b) => (b.calories > a.calories ? b : a), allJourneys[0]);
+
+    const rows = [
+      { label: 'Longest walk',    value: longest.distMeters ? formatDistance(longest.distMeters) : '—',
+        sub: escapeHtml(longest.name || '') },
+      { label: 'Longest duration', value: longest2.durationMin ? formatDuration(longest2.durationMin) : '—',
+        sub: escapeHtml(longest2.name || '') },
+      { label: 'Best pace',       value: fastest ? formatPace(fastest.durationMin, fastest.distMeters) + '/mi' : '—',
+        sub: fastest ? escapeHtml(fastest.name || '') : '' },
+      { label: 'Most calories',   value: mostCals?.calories ? Math.round(mostCals.calories) + ' cal' : '—',
+        sub: mostCals ? escapeHtml(mostCals.name || '') : '' },
+    ];
+
+    bests.innerHTML = rows.map(r => `
+      <div class="stats-row">
+        <span class="stats-row-label">${r.label}<br><small style="font-size:0.72rem;color:var(--ink-muted)">${r.sub}</small></span>
+        <span class="stats-row-value">${r.value}</span>
+      </div>
+    `).join('');
+  }
+
+  // ── Patterns ──────────────────────────────────────────────────────
+  const patternsEl = document.getElementById('stats-patterns');
+  if (entries.length === 0) {
+    patternsEl.innerHTML = '<div class="widget-empty" style="font-size:0.8rem">No data for this period.</div>';
+  } else {
+    const avgMiles = totalMiles / totalWalks;
+    const avgMins  = totalMins  / totalWalks;
+
+    // Most walked month (all time)
+    const byMonth = {};
+    allJourneys.forEach(e => {
+      const key = new Date(e.datetime).toLocaleString('default', { month: 'long', year: 'numeric' });
+      byMonth[key] = (byMonth[key] || 0) + 1;
+    });
+    const topMonth = Object.entries(byMonth).sort((a, b) => b[1] - a[1])[0];
+
+    // Favorite companion
+    const compCounts = {};
+    allJourneys.forEach(e => {
+      if (!e.companions) return;
+      e.companions.split(',').map(s => s.trim()).filter(Boolean).forEach(c => {
+        compCounts[c.toLowerCase()] = (compCounts[c.toLowerCase()] || 0) + 1;
+      });
+    });
+    const topComp = Object.entries(compCounts)
+      .filter(([k]) => !['solo','alone',''].includes(k))
+      .sort((a, b) => b[1] - a[1])[0];
+
+    const rows = [
+      { label: 'Avg walk distance', value: `${avgMiles.toFixed(1)} mi` },
+      { label: 'Avg walk duration', value: formatDuration(avgMins) },
+      { label: 'Most active month', value: topMonth ? topMonth[0] : '—' },
+      { label: 'Top companion',     value: topComp ? topComp[0] : '—' },
+    ];
+
+    patternsEl.innerHTML = rows.map(r => `
+      <div class="stats-row">
+        <span class="stats-row-label">${r.label}</span>
+        <span class="stats-row-value">${r.value}</span>
+      </div>
+    `).join('');
+  }
+}
+
+function drawWeeklyChart(journeys) {
+  const canvas = document.getElementById('stats-canvas-weekly');
+  const W = canvas.offsetWidth || 500;
+  const H = 120;
+  canvas.width  = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  // Build last 12 week buckets
+  const weeks = [];
+  const now = new Date();
+  for (let i = 11; i >= 0; i--) {
+    const start = new Date(now);
+    start.setDate(now.getDate() - now.getDay() - i * 7);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 7);
+    const miles = journeys
+      .filter(e => { const d = new Date(e.datetime); return d >= start && d < end; })
+      .reduce((s, e) => s + (e.distMeters || 0), 0) / METERS_PER_MILE;
+    weeks.push({ label: `${start.getMonth()+1}/${start.getDate()}`, miles });
+  }
+
+  const maxMiles = Math.max(...weeks.map(w => w.miles), 0.1);
+  const barW  = Math.floor((W - 20) / weeks.length) - 2;
+  const isDark = document.body.classList.contains('dark');
+  const barColor   = '#4a7c59';
+  const labelColor = isDark ? 'rgba(240,236,228,0.5)' : 'rgba(60,50,30,0.4)';
+
+  weeks.forEach((w, i) => {
+    const x   = 10 + i * (barW + 2);
+    const barH = w.miles > 0 ? Math.max(4, ((w.miles / maxMiles) * (H - 28))) : 0;
+    const y   = H - 18 - barH;
+
+    ctx.fillStyle = barColor;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(x, y, barW, barH, 2) : ctx.rect(x, y, barW, barH);
+    ctx.fill();
+
+    // Week label every 3rd
+    if (i % 3 === 0) {
+      ctx.fillStyle = labelColor;
+      ctx.font = '9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(w.label, x + barW / 2, H - 4);
+    }
+  });
+}
+
+function drawDowChart(entries) {
+  const canvas = document.getElementById('stats-canvas-dow');
+  const W = canvas.offsetWidth || 200;
+  const H = 120;
+  canvas.width  = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  const days  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const counts = new Array(7).fill(0);
+  entries.forEach(e => counts[new Date(e.datetime).getDay()]++);
+
+  const maxCount = Math.max(...counts, 1);
+  const barW     = Math.floor((W - 10) / 7) - 2;
+  const isDark   = document.body.classList.contains('dark');
+  const barColor   = '#4a7c59';
+  const labelColor = isDark ? 'rgba(240,236,228,0.5)' : 'rgba(60,50,30,0.4)';
+
+  counts.forEach((c, i) => {
+    const x    = 5 + i * (barW + 2);
+    const barH = c > 0 ? Math.max(4, (c / maxCount) * (H - 28)) : 0;
+    const y    = H - 18 - barH;
+
+    ctx.fillStyle = barColor;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(x, y, barW, barH, 2) : ctx.rect(x, y, barW, barH);
+    ctx.fill();
+
+    ctx.fillStyle = labelColor;
+    ctx.font = '9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(days[i], x + barW / 2, H - 4);
+  });
+}
+
 // ─── Settings Modal ───────────────────────────────────────────────
 
 function populateSettingsModal() {
