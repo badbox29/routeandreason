@@ -70,6 +70,7 @@ const state = {
   prefillSourceRef: null,      // { entryId, friendToken, username } when using a friend's route
   mentionEntries:  [],          // mention notifications fetched from KV
   mentionCache:    {},          // { username: { token, found } } to avoid re-lookups
+  goals:           {},          // { miles, walks } weekly targets
   // Social
   username:    null,     // this user's chosen username
   friends:     [],       // [{username, token}] confirmed friends
@@ -1567,6 +1568,7 @@ document.getElementById('btn-save-journey').addEventListener('click', async () =
     await saveRoute(route);
     renderSavedRoutes();
   renderElevationRecords();
+  renderGoalsWidget();
   }
 
   await saveEntry(entry);
@@ -2142,6 +2144,7 @@ function openViewModal(entry) {
       await saveRoute(route);
       renderSavedRoutes();
   renderElevationRecords();
+  renderGoalsWidget();
       bookmarkBtn.textContent = 'Bookmarked ✓';
       bookmarkBtn.disabled    = true;
       showToast(`Route bookmarked ✓`);
@@ -2253,6 +2256,105 @@ function editEntry(entry) {
   }
 }
 
+// ─── Walk Goals ───────────────────────────────────────────────────
+
+function loadGoals() {
+  const raw = localStorage.getItem('wj_goals');
+  if (raw) {
+    try { state.goals = JSON.parse(raw); } catch(e) { state.goals = {}; }
+  }
+}
+
+function saveGoals() {
+  localStorage.setItem('wj_goals', JSON.stringify(state.goals));
+}
+
+function getThisWeekJourneys() {
+  const now   = new Date();
+  const start = new Date(now);
+  start.setDate(now.getDate() - now.getDay()); // Sunday
+  start.setHours(0, 0, 0, 0);
+  return state.entries.filter(e =>
+    e.type === 'journey' && new Date(e.datetime) >= start
+  );
+}
+
+function renderGoalsWidget() {
+  const el        = document.getElementById('goals-display');
+  const goalMiles = parseFloat(state.goals?.miles) || 0;
+  const goalWalks = parseInt(state.goals?.walks)   || 0;
+
+  if (!goalMiles && !goalWalks) {
+    el.innerHTML = '<div class="widget-empty">Tap Edit to set a weekly goal.</div>';
+    return;
+  }
+
+  const week       = getThisWeekJourneys();
+  const doneMiles  = week.reduce((s, e) => s + (e.distMeters || 0), 0) / METERS_PER_MILE;
+  const doneWalks  = week.length;
+
+  let html = '';
+
+  if (goalMiles) {
+    const pct      = Math.min(doneMiles / goalMiles * 100, 100);
+    const complete = doneMiles >= goalMiles;
+    html += `
+      <div class="goal-item">
+        <div class="goal-item-header">
+          <span class="goal-item-label">Miles this week</span>
+          <span class="goal-item-value">${doneMiles.toFixed(1)} / ${goalMiles} mi</span>
+        </div>
+        <div class="goal-bar-track">
+          <div class="goal-bar-fill${complete ? ' complete' : ''}" style="width:${pct}%"></div>
+        </div>
+        ${complete ? '<div class="goal-complete-badge">✓ Goal reached!</div>' : ''}
+      </div>`;
+  }
+
+  if (goalWalks) {
+    const pct      = Math.min(doneWalks / goalWalks * 100, 100);
+    const complete = doneWalks >= goalWalks;
+    html += `
+      <div class="goal-item">
+        <div class="goal-item-header">
+          <span class="goal-item-label">Walks this week</span>
+          <span class="goal-item-value">${doneWalks} / ${goalWalks}</span>
+        </div>
+        <div class="goal-bar-track">
+          <div class="goal-bar-fill${complete ? ' complete' : ''}" style="width:${pct}%"></div>
+        </div>
+        ${complete ? '<div class="goal-complete-badge">✓ Goal reached!</div>' : ''}
+      </div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+// Goals widget interactions
+document.getElementById('btn-edit-goals').addEventListener('click', () => {
+  const editEl = document.getElementById('goals-edit');
+  const isOpen = editEl.style.display !== 'none';
+  editEl.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    document.getElementById('goal-miles').value = state.goals?.miles || '';
+    document.getElementById('goal-walks').value = state.goals?.walks || '';
+  }
+});
+
+document.getElementById('btn-save-goals').addEventListener('click', () => {
+  const miles = parseFloat(document.getElementById('goal-miles').value) || 0;
+  const walks = parseInt(document.getElementById('goal-walks').value)   || 0;
+  state.goals = { miles: miles || null, walks: walks || null };
+  saveGoals();
+  document.getElementById('goals-edit').style.display = 'none';
+  document.getElementById('btn-edit-goals').textContent = 'Edit';
+  renderGoalsWidget();
+});
+
+document.getElementById('btn-cancel-goals').addEventListener('click', () => {
+  document.getElementById('goals-edit').style.display = 'none';
+});
+
 // ─── Saved Routes Sidebar ─────────────────────────────────────────
 
 function renderSavedRoutes() {
@@ -2312,6 +2414,7 @@ document.querySelectorAll('.route-tab').forEach(btn => {
     state.activeRouteTab = btn.dataset.tab;
     renderSavedRoutes();
   renderElevationRecords();
+  renderGoalsWidget();
   });
 });
 
@@ -2381,6 +2484,7 @@ function promptDeleteRouteModal(route) {
     closeModal('modal-delete-route');
     renderSavedRoutes();
   renderElevationRecords();
+  renderGoalsWidget();
     showToast('Route deleted');
   });
 
@@ -2687,6 +2791,7 @@ document.getElementById('btn-import-token').addEventListener('click', () => {
       renderSpotlight();
       renderSavedRoutes();
   renderElevationRecords();
+  renderGoalsWidget();
       renderWeatherSidebar();
       updateFriendsBadge();
     });
@@ -2775,6 +2880,7 @@ document.getElementById('btn-save-settings').addEventListener('click', async () 
       renderSpotlight();
       renderSavedRoutes();
   renderElevationRecords();
+  renderGoalsWidget();
       renderWeatherSidebar();
       updateWorkerDependentToggles();
       updateFriendsBadge();
@@ -3227,6 +3333,7 @@ async function doFriendSearch() {
 
 async function init() {
   loadSettings();
+  loadGoals();
   applyDarkMode();  // apply before any KV fetch to avoid flash
 
   if (state.workerUrl) {
@@ -3246,6 +3353,7 @@ async function init() {
   renderSpotlight();
   renderSavedRoutes();
   renderElevationRecords();
+  renderGoalsWidget();
   renderWeatherSidebar();
   updateWorkerDependentToggles();
   updateFriendsBadge();
