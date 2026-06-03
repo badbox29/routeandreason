@@ -3009,9 +3009,9 @@ function renderWeatherLocation(data) {
 }
 
 function pollenClassFromCategory(category) {
-  if (!category) return 'pollen-low';
+  if (!category) return 'pollen-vlow';
   const c = category.toUpperCase();
-  if (c === 'NONE' || c === 'VERY_LOW') return 'pollen-low';
+  if (c === 'NONE' || c === 'VERY_LOW') return 'pollen-vlow';
   if (c === 'LOW')      return 'pollen-low';
   if (c === 'MODERATE') return 'pollen-moderate';
   if (c === 'HIGH')     return 'pollen-high';
