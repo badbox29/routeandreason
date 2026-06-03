@@ -374,7 +374,11 @@ async function loadProfileFromKV() {
       }
     }
 
-    if (Array.isArray(profile.incomingReqs)) state.incomingReqs = profile.incomingReqs;
+    if (Array.isArray(profile.incomingReqs)) {
+      // Filter out requests from already-confirmed friends (KV eventual consistency guard)
+      const friendTokens = new Set(state.friends.map(f => f.token));
+      state.incomingReqs = profile.incomingReqs.filter(r => !friendTokens.has(r.token));
+    }
     if (Array.isArray(profile.outgoingReqs)) state.outgoingReqs = profile.outgoingReqs;
     if (profile.darkMode != null) state.darkMode = profile.darkMode;
     // Sync merged state to localStorage as cache
@@ -757,7 +761,14 @@ async function refreshFriendsBadge() {
   try {
     const profile = await kvGet('profile');
     if (profile?.incomingReqs) {
-      state.incomingReqs = profile.incomingReqs;
+      // Filter out any requests from people already confirmed as friends
+      // This guards against KV eventual consistency returning stale data
+      const friendTokens = new Set(state.friends.map(f => f.token));
+      state.incomingReqs = profile.incomingReqs.filter(r => !friendTokens.has(r.token));
+      // If we filtered any out, write the clean version back to KV
+      if (state.incomingReqs.length < profile.incomingReqs.length) {
+        saveProfileToKV().catch(() => {});
+      }
     }
     updateFriendsBadge();
   } catch(e) { /* silent */ }
