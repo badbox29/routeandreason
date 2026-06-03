@@ -30,8 +30,18 @@
         <span class="brand-name">Route &amp; Reason</span>
       </div>
       <nav class="header-actions">
-        <button class="btn btn-ghost" id="btn-new-entry">Log a Journal Entry</button>
-        <button class="btn btn-primary" id="btn-new-journey">Log a Journey</button>
+        <button class="btn btn-ghost" id="btn-new-entry" title="Log a Journal Entry">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+          <span class="btn-label">Log a Journal Entry</span>
+        </button>
+        <button class="btn btn-primary" id="btn-new-journey" title="Log a Journey">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="10" r="3"/><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+          </svg>
+          <span class="btn-label">Log a Journey</span>
+        </button>
         <button class="btn btn-icon btn-friends" id="btn-friends" title="Friends">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
@@ -46,11 +56,6 @@
         <button class="btn btn-icon" id="btn-stats" title="Stats dashboard">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
-          </svg>
-        </button>
-        <button class="btn btn-icon" id="btn-export-import" title="Export / Import">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
           </svg>
         </button>
         <button class="btn btn-icon" id="btn-settings" title="Settings">
@@ -778,66 +783,6 @@
   <!-- Dark mode toggle (fixed bottom-right) -->
   <div class="tdnn" onclick="tdnn()">
     <div class="moon"></div>
-  </div>
-
-  <!-- ═══════════════════════════════════════════════════════════════ -->
-  <!-- MODAL: Export / Import                                          -->
-  <!-- ═══════════════════════════════════════════════════════════════ -->
-  <div class="modal-overlay" id="modal-export" role="dialog" aria-modal="true" aria-label="Export and Import">
-    <div class="modal modal-export">
-      <div class="modal-header">
-        <h2 class="modal-title">Export &amp; Import</h2>
-        <button class="modal-close" data-close="modal-export">✕</button>
-      </div>
-      <div class="modal-body export-modal-body">
-
-        <!-- Export section -->
-        <div class="export-section">
-          <div class="export-section-title">Export</div>
-
-          <div class="export-option">
-            <div class="export-option-info">
-              <div class="export-option-name">JSON Backup</div>
-              <div class="export-option-desc">Complete backup of all entries, routes, and settings. Use this to restore or move to another browser.</div>
-            </div>
-            <button class="btn btn-sm btn-primary" id="btn-export-json">Download</button>
-          </div>
-
-          <div class="export-option">
-            <div class="export-option-info">
-              <div class="export-option-name">CSV Spreadsheet</div>
-              <div class="export-option-desc">All journey entries as a flat table — date, distance, duration, pace, companions, mood, notes, and more.</div>
-            </div>
-            <button class="btn btn-sm btn-primary" id="btn-export-csv">Download</button>
-          </div>
-
-          <div class="export-option">
-            <div class="export-option-info">
-              <div class="export-option-name">GPX Routes</div>
-              <div class="export-option-desc">All journeys with route data as GPS tracks. Compatible with Strava, Garmin, AllTrails, Google Earth, and most mapping tools.</div>
-            </div>
-            <button class="btn btn-sm btn-primary" id="btn-export-gpx-all">Download</button>
-          </div>
-        </div>
-
-        <!-- Import section -->
-        <div class="export-section export-section-import">
-          <div class="export-section-title">Import</div>
-          <div class="export-option">
-            <div class="export-option-info">
-              <div class="export-option-name">Restore from JSON Backup</div>
-              <div class="export-option-desc">Restore entries, routes, and settings from a previously exported JSON file. Existing data will be merged — nothing is deleted.</div>
-            </div>
-            <label class="btn btn-sm btn-outline" id="btn-import-label">
-              Choose File
-              <input type="file" id="import-file-input" accept=".json" style="display:none" />
-            </label>
-          </div>
-          <div id="import-status" style="display:none"></div>
-        </div>
-
-      </div>
-    </div>
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════ -->
