@@ -3226,8 +3226,9 @@ document.getElementById('friend-search-input').addEventListener('keydown', e => 
 });
 
 async function doFriendSearch() {
-  const q = document.getElementById('friend-search-input').value.trim().toLowerCase();
-  const el = document.getElementById('friend-search-results');
+  const raw = document.getElementById('friend-search-input').value.trim();
+  const q   = raw.startsWith('@') ? raw.slice(1).toLowerCase() : raw.toLowerCase();
+  const el  = document.getElementById('friend-search-results');
   if (!q) return;
   if (!state.workerUrl) { showToast('Worker URL required'); return; }
   if (!state.username) { showToast('Set your username in Settings first'); return; }
