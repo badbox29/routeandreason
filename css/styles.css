@@ -1590,6 +1590,73 @@ a:hover { text-decoration: underline; }
 .entry-card.type-mention { border-left: 3px solid #1a56b0; }
 .tag-mention-feed { background: #e8f0fe; color: #1a56b0; }
 
+/* ── Walk Goals Widget ───────────────────────────────────────────── */
+.goals-edit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.goals-edit-label {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.input-tiny {
+  width: 80px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.goals-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  justify-content: flex-end;
+}
+
+.goal-item {
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.goal-item:first-child { border-top: none; }
+
+.goal-item-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+
+.goal-item-label { color: var(--ink-soft); }
+.goal-item-value { color: var(--ink); font-weight: 500; }
+
+.goal-bar-track {
+  height: 6px;
+  background: var(--border-soft);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.goal-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--green-mid);
+  transition: width 0.4s ease;
+}
+
+.goal-bar-fill.complete { background: #2e7d4f; }
+
+.goal-complete-badge {
+  font-size: 0.72rem;
+  color: #2e7d4f;
+  font-weight: 600;
+  margin-top: 0.2rem;
+}
+
 /* ── Elevation Records Widget ────────────────────────────────────── */
 .elev-record-item {
   padding: 0.6rem 0;
