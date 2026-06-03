@@ -316,11 +316,13 @@ async function saveProfileToKV() {
     let existing = {};
     try { existing = (await kvGet('profile')) || {}; } catch(e) { /* first save */ }
 
-    // Never overwrite a non-empty friends/requests list with an empty one.
-    // This guards against a KV read failure during deployment causing data loss.
-    const friends      = state.friends.length      ? state.friends      : (existing.friends      || []);
-    const incomingReqs = state.incomingReqs.length  ? state.incomingReqs  : (existing.incomingReqs  || []);
-    const outgoingReqs = state.outgoingReqs.length  ? state.outgoingReqs  : (existing.outgoingReqs  || []);
+    // Never overwrite a non-empty friends list with an empty one —
+    // guards against a KV read failure during deployment causing data loss.
+    // But incomingReqs and outgoingReqs MUST always use current state,
+    // since they can legitimately be empty after approvals/cancellations.
+    const friends      = state.friends.length ? state.friends : (existing.friends || []);
+    const incomingReqs = state.incomingReqs;
+    const outgoingReqs = state.outgoingReqs;
 
     const merged = {
       username:     state.username    ?? existing.username    ?? null,
