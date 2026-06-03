@@ -647,6 +647,63 @@ a:hover { text-decoration: underline; }
 .modal-view    { max-width: 680px; }
 .modal-discover { max-width: 780px; }
 .modal-stats    { max-width: 820px; }
+.modal-export   { max-width: 560px; }
+
+.export-modal-body { padding: 0 1.5rem 1.5rem; }
+
+.export-section {
+  margin-bottom: 1.5rem;
+}
+
+.export-section-import {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 1.25rem;
+}
+
+.export-section-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+  margin-bottom: 0.85rem;
+}
+
+.export-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.export-option:first-of-type { border-top: none; }
+
+.export-option-info { min-width: 0; }
+
+.export-option-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 0.2rem;
+}
+
+.export-option-desc {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  line-height: 1.4;
+}
+
+#import-status {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+#import-status.success { background: var(--green-pale); color: var(--green-dark); }
+#import-status.error   { background: #fde8e8; color: #721c24; }
 
 /* Stats modal body */
 .stats-modal-body { padding: 0 1.5rem 1.5rem; }
