@@ -2515,6 +2515,230 @@ function promptDeleteRouteModal(route) {
   openModal('modal-delete-route');
 }
 
+// ─── Export / Import Modal ────────────────────────────────────────
+
+document.getElementById('btn-export-import').addEventListener('click', () => {
+  openModal('modal-export');
+});
+
+document.querySelector('#modal-export [data-close]').addEventListener('click', () => {
+  closeModal('modal-export');
+});
+
+// ── JSON Export ───────────────────────────────────────────────────
+document.getElementById('btn-export-json').addEventListener('click', () => {
+  const backup = {
+    version:    '2.0',
+    exportedAt: new Date().toISOString(),
+    entries:    state.entries,
+    routes:     state.savedRoutes,
+    settings: {
+      username:    state.username,
+      sex:         state.sex,
+      ageyears:    state.ageyears,
+      heightIn:    state.heightIn,
+      weightLbs:   state.weightLbs,
+      pageSize:    state.pageSize,
+      weatherLocs: state.weatherLocs,
+      darkMode:    state.darkMode,
+      goals:       state.goals,
+    },
+  };
+  const date = new Date().toISOString().slice(0, 10);
+  downloadFile(JSON.stringify(backup, null, 2), `routeandreason-backup-${date}.json`, 'application/json');
+  showToast('JSON backup downloaded ✓');
+});
+
+// ── CSV Export ────────────────────────────────────────────────────
+document.getElementById('btn-export-csv').addEventListener('click', () => {
+  const journeys = state.entries.filter(e => e.type === 'journey');
+  if (journeys.length === 0) { showToast('No journey entries to export'); return; }
+
+  const headers = [
+    'Date', 'Name', 'Distance (mi)', 'Duration (min)', 'Pace (min/mi)',
+    'Calories', 'Companions', 'Mood', 'Energy Start', 'Energy End',
+    'Elev Gain (ft)', 'Elev High (ft)', 'Visibility', 'Notes'
+  ];
+
+  const rows = journeys.map(e => {
+    const miles = e.distMeters ? (e.distMeters / METERS_PER_MILE).toFixed(2) : '';
+    const pace  = (e.durationMin && e.distMeters)
+      ? (e.durationMin / (e.distMeters / METERS_PER_MILE)).toFixed(1) : '';
+    const gainFt = e.elevGainM != null ? Math.round(e.elevGainM * 3.28084) : '';
+    const highFt = e.elevHighM != null ? Math.round(e.elevHighM * 3.28084) : '';
+    return [
+      e.datetime ? new Date(e.datetime).toLocaleString() : '',
+      e.name || '',
+      miles,
+      e.durationMin || '',
+      pace,
+      e.calories ? Math.round(e.calories) : '',
+      e.companions || '',
+      e.mood || '',
+      e.energyStart || '',
+      e.energyEnd   || '',
+      gainFt,
+      highFt,
+      e.visibility || '',
+      (e.notes || '').replace(/\n/g, ' '),
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+  });
+
+  const csv  = [headers.join(','), ...rows].join('\n');
+  const date = new Date().toISOString().slice(0, 10);
+  downloadFile(csv, `routeandreason-journeys-${date}.csv`, 'text/csv');
+  showToast(`Exported ${journeys.length} journeys ✓`);
+});
+
+// ── GPX Export ────────────────────────────────────────────────────
+document.getElementById('btn-export-gpx-all').addEventListener('click', () => {
+  const journeys = state.entries.filter(e =>
+    e.type === 'journey' && e.waypoints && e.waypoints.length >= 2
+  );
+  if (journeys.length === 0) { showToast('No journeys with route data to export'); return; }
+
+  const tracks = journeys.map(e => {
+    const startTime  = e.datetime ? new Date(e.datetime) : null;
+    const durationMs = e.durationMin ? e.durationMin * 60 * 1000 : null;
+    const pts        = e.waypoints || [];
+    const elevData   = e.elevGainM != null; // rough proxy — we don't store per-point elevation
+
+    const trkpts = pts.map((wp, i) => {
+      // Interpolate timestamps if we have start + duration
+      let timeTag = '';
+      if (startTime) {
+        let t;
+        if (durationMs && pts.length > 1) {
+          t = new Date(startTime.getTime() + (i / (pts.length - 1)) * durationMs);
+        } else {
+          t = startTime;
+        }
+        timeTag = `\n        <time>${t.toISOString()}</time>`;
+      }
+      // Include elevation if stored (use high as approximation — real per-point not stored)
+      // We omit <ele> since we don't have per-point elevation stored
+      return `      <trkpt lat="${wp.lat.toFixed(6)}" lon="${wp.lng.toFixed(6)}">${timeTag}\n      </trkpt>`;
+    }).join('\n');
+
+    const desc = [
+      e.distMeters ? `Distance: ${(e.distMeters / METERS_PER_MILE).toFixed(2)} mi` : '',
+      e.durationMin ? `Duration: ${formatDuration(e.durationMin)}` : '',
+      e.companions ? `With: ${e.companions}` : '',
+      e.notes ? e.notes.slice(0, 200) : '',
+    ].filter(Boolean).join('. ');
+
+    const timeEl = startTime ? `\n    <time>${startTime.toISOString()}</time>` : '';
+
+    return `  <trk>
+    <name>${escapeXml(e.name || 'Untitled Walk')}</name>
+    <desc>${escapeXml(desc)}</desc>${timeEl}
+    <trkseg>
+${trkpts}
+    </trkseg>
+  </trk>`;
+  }).join('\n');
+
+  const gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Route &amp; Reason"
+  xmlns="http://www.topografix.com/GPX/1/1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  <metadata>
+    <name>Route &amp; Reason Export</name>
+    <time>${new Date().toISOString()}</time>
+  </metadata>
+${tracks}
+</gpx>`;
+
+  const date = new Date().toISOString().slice(0, 10);
+  downloadFile(gpx, `routeandreason-routes-${date}.gpx`, 'application/gpx+xml');
+  showToast(`Exported ${journeys.length} routes ✓`);
+});
+
+// ── JSON Import ───────────────────────────────────────────────────
+document.getElementById('import-file-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const statusEl = document.getElementById('import-status');
+  statusEl.style.display = 'block';
+  statusEl.className = '';
+  statusEl.textContent = 'Reading file…';
+
+  try {
+    const text    = await file.text();
+    const backup  = JSON.parse(text);
+
+    if (!backup.entries && !backup.routes && !backup.settings) {
+      throw new Error('File does not appear to be a Route & Reason backup.');
+    }
+
+    let importedEntries = 0;
+    let importedRoutes  = 0;
+
+    // Merge entries (skip duplicates by id)
+    if (Array.isArray(backup.entries)) {
+      const existingIds = new Set(state.entries.map(e => e.id));
+      const newEntries  = backup.entries.filter(e => e.id && !existingIds.has(e.id));
+      state.entries = [...state.entries, ...newEntries]
+        .sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
+      importedEntries = newEntries.length;
+      localStorage.setItem('wj_entries', JSON.stringify(state.entries));
+      // Sync to KV
+      if (state.workerUrl) {
+        for (const entry of newEntries) {
+          kvPut(`entry/${entry.id}`, entry).catch(() => {});
+        }
+      }
+    }
+
+    // Merge routes (skip duplicates by id)
+    if (Array.isArray(backup.routes)) {
+      const existingIds = new Set(state.savedRoutes.map(r => r.id));
+      const newRoutes   = backup.routes.filter(r => r.id && !existingIds.has(r.id));
+      state.savedRoutes = [...state.savedRoutes, ...newRoutes];
+      importedRoutes = newRoutes.length;
+      localStorage.setItem('wj_routes', JSON.stringify(state.savedRoutes));
+      if (state.workerUrl) {
+        for (const route of newRoutes) {
+          kvPut(`route/${route.id}`, route).catch(() => {});
+        }
+      }
+    }
+
+    // Restore settings — only fill in nulls, don't overwrite existing
+    if (backup.settings) {
+      const s = backup.settings;
+      if (!state.username   && s.username)   state.username   = s.username;
+      if (!state.sex        && s.sex)        state.sex        = s.sex;
+      if (!state.ageyears   && s.ageyears)   state.ageyears   = s.ageyears;
+      if (!state.heightIn   && s.heightIn)   state.heightIn   = s.heightIn;
+      if (!state.weightLbs  && s.weightLbs)  state.weightLbs  = s.weightLbs;
+      if (!state.weatherLocs?.length && s.weatherLocs?.length) state.weatherLocs = s.weatherLocs;
+      if (!state.goals?.miles && !state.goals?.walks && s.goals) state.goals = s.goals;
+      saveSettings();
+      saveGoals();
+    }
+
+    renderFeed();
+    renderSpotlight();
+    renderSavedRoutes();
+    renderElevationRecords();
+    renderGoalsWidget();
+
+    statusEl.className   = 'success';
+    statusEl.textContent = `✓ Imported ${importedEntries} entries and ${importedRoutes} routes.`;
+
+    // Reset file input so same file can be re-selected
+    e.target.value = '';
+
+  } catch(err) {
+    statusEl.className   = 'error';
+    statusEl.textContent = `✗ Import failed: ${err.message}`;
+    e.target.value = '';
+  }
+});
+
 // ─── Stats Dashboard ──────────────────────────────────────────────
 
 let statsWindow = 'week'; // 'week' | 'month' | 'year' | 'all'
