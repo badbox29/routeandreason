@@ -1787,3 +1787,18 @@ body.dark .spotlight-entry-meta {
 body.dark .spotlight-entry-excerpt {
   color: rgba(240,236,228,0.75);
 }
+
+/* Header stays dark-green in both modes — pin brand and ghost button text to light values */
+body.dark .brand,
+body.dark .brand-name {
+  color: #f0ece4;
+}
+
+body.dark .site-header .btn-ghost {
+  color: rgba(255,255,255,0.85);
+  border-color: rgba(255,255,255,0.2);
+}
+body.dark .site-header .btn-ghost:hover {
+  color: #fff;
+  background: rgba(255,255,255,0.1);
+}
