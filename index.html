@@ -179,6 +179,8 @@
           <!-- Map Controls -->
           <div class="map-controls-row">
             <button class="btn btn-sm btn-ghost" id="btn-undo-waypoint">↩ Undo</button>
+            <button class="btn btn-sm btn-ghost" id="btn-reverse-route">⇄ Reverse</button>
+            <button class="btn btn-sm btn-ghost" id="btn-close-loop" style="display:none">⟳ Close Loop</button>
             <button class="btn btn-sm btn-ghost" id="btn-clear-route">✕ Clear</button>
           </div>
 
@@ -303,10 +305,9 @@
             <input type="number" class="input" id="journey-temp" placeholder="e.g. 68" min="-50" max="130" />
           </div>
 
-          <div class="form-group" style="position:relative;">
+          <div class="form-group">
             <label class="form-label">Companions</label>
-            <input type="text" class="input" id="journey-companions" placeholder="e.g. Solo, Mom, @annie… free text or @tag" />
-            <div id="companions-dropdown" class="mention-dropdown" style="display:none;"></div>
+            <input type="text" class="input" id="journey-companions" placeholder="e.g. Solo, With Sarah, Family…" />
           </div>
 
           <div class="form-group" style="position:relative;">
