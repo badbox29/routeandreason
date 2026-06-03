@@ -843,7 +843,7 @@ a:hover { text-decoration: underline; }
 /* Stats bar */
 .stats-bar {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
   gap: 0.5rem;
   background: var(--parchment-2);
   border-radius: var(--radius-sm);
@@ -1466,7 +1466,50 @@ a:hover { text-decoration: underline; }
 .entry-card.type-mention { border-left: 3px solid #1a56b0; }
 .tag-mention-feed { background: #e8f0fe; color: #1a56b0; }
 
-/* ── Route attribution ───────────────────────────────────────────── */
+/* ── Elevation Records Widget ────────────────────────────────────── */
+.elev-record-item {
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--border-soft);
+  cursor: pointer;
+  transition: background var(--transition);
+  border-radius: var(--radius-sm);
+}
+
+.elev-record-item:first-child { border-top: none; }
+.elev-record-item:hover { background: var(--parchment-2); }
+
+.elev-record-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--green-mid);
+  margin-bottom: 0.1rem;
+}
+
+.elev-record-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--ink);
+  font-family: var(--font-display);
+}
+
+.elev-record-name {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  margin-top: 0.1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.elev-record-date {
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+
+/* Elevation stats in stats bar */
+.stat-elev .stat-value { color: var(--green-mid); }
 .route-walked-by {
   font-size: 0.8rem;
   color: var(--green-mid);
@@ -1619,19 +1662,4 @@ body.dark .spotlight-entry-meta {
 }
 body.dark .spotlight-entry-excerpt {
   color: rgba(240,236,228,0.75);
-}
-
-/* Header stays dark-green in both modes — pin brand and ghost button text to light values */
-body.dark .brand,
-body.dark .brand-name {
-  color: #f0ece4;
-}
-
-body.dark .site-header .btn-ghost {
-  color: rgba(255,255,255,0.85);
-  border-color: rgba(255,255,255,0.2);
-}
-body.dark .site-header .btn-ghost:hover {
-  color: #fff;
-  background: rgba(255,255,255,0.1);
 }
