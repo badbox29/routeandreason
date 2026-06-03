@@ -1508,10 +1508,21 @@ a:hover { text-decoration: underline; }
 
 .friends-tabs {
   display: flex;
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--border-soft);
   background: var(--cream);
   padding: 0 1.75rem;
   gap: 0;
+}
+
+@media (max-width: 480px) {
+  .friends-tabs {
+    padding: 0 1rem;
+  }
+  .friends-tab {
+    padding: 0.6rem 0.75rem;
+    font-size: 0.8rem;
+  }
 }
 
 .friends-tab {
