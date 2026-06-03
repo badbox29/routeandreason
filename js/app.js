@@ -316,6 +316,12 @@ async function saveProfileToKV() {
     let existing = {};
     try { existing = (await kvGet('profile')) || {}; } catch(e) { /* first save */ }
 
+    // Never overwrite a non-empty friends/requests list with an empty one.
+    // This guards against a KV read failure during deployment causing data loss.
+    const friends      = state.friends.length      ? state.friends      : (existing.friends      || []);
+    const incomingReqs = state.incomingReqs.length  ? state.incomingReqs  : (existing.incomingReqs  || []);
+    const outgoingReqs = state.outgoingReqs.length  ? state.outgoingReqs  : (existing.outgoingReqs  || []);
+
     const merged = {
       username:     state.username    ?? existing.username    ?? null,
       sex:          state.sex         ?? existing.sex         ?? null,
@@ -324,13 +330,16 @@ async function saveProfileToKV() {
       weightLbs:    state.weightLbs   ?? existing.weightLbs   ?? null,
       pageSize:     state.pageSize    ?? existing.pageSize    ?? 20,
       weatherLocs:  state.weatherLocs?.length ? state.weatherLocs : (existing.weatherLocs ?? []),
-      friends:      state.friends     ?? existing.friends     ?? [],
-      incomingReqs: state.incomingReqs ?? existing.incomingReqs ?? [],
-      outgoingReqs: state.outgoingReqs ?? existing.outgoingReqs ?? [],
+      friends,
+      incomingReqs,
+      outgoingReqs,
       darkMode:     state.darkMode     ?? existing.darkMode     ?? false,
     };
 
     await kvPut('profile', merged);
+
+    // Also back up friends to localStorage so a KV blip can't wipe them
+    if (friends.length) localStorage.setItem('wj_friends', JSON.stringify(friends));
   } catch(e) {
     console.warn('Profile KV save failed:', e.message);
   }
@@ -350,7 +359,19 @@ async function loadProfileFromKV() {
     if (profile.weightLbs  != null) state.weightLbs  = profile.weightLbs;
     if (profile.pageSize   != null) state.pageSize   = profile.pageSize;
     if (Array.isArray(profile.weatherLocs) && profile.weatherLocs.length > 0) state.weatherLocs = profile.weatherLocs;
-    if (Array.isArray(profile.friends))     state.friends     = profile.friends;
+
+    // For friends/requests: use KV value if non-empty, else fall back to localStorage backup
+    if (Array.isArray(profile.friends) && profile.friends.length > 0) {
+      state.friends = profile.friends;
+    } else {
+      const localFriends = JSON.parse(localStorage.getItem('wj_friends') || '[]');
+      if (localFriends.length > 0) {
+        state.friends = localFriends;
+        // Restore to KV immediately
+        saveProfileToKV().catch(() => {});
+      }
+    }
+
     if (Array.isArray(profile.incomingReqs)) state.incomingReqs = profile.incomingReqs;
     if (Array.isArray(profile.outgoingReqs)) state.outgoingReqs = profile.outgoingReqs;
     if (profile.darkMode != null) state.darkMode = profile.darkMode;
@@ -358,6 +379,9 @@ async function loadProfileFromKV() {
     saveSettings();
   } catch(e) {
     console.warn('[Profile KV] load failed:', e.message);
+    // If KV is unreachable, try to load friends from localStorage backup
+    const localFriends = JSON.parse(localStorage.getItem('wj_friends') || '[]');
+    if (localFriends.length > 0) state.friends = localFriends;
   }
 }
 
