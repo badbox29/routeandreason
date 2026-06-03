@@ -164,6 +164,34 @@ a:hover { text-decoration: underline; }
   }
 }
 
+/* ── Very narrow screens (closed fold ~370px) ────────────────────── */
+@media (max-width: 420px) {
+  .header-inner {
+    padding: 0 0.4rem;
+    gap: 0;
+  }
+
+  .brand-icon-img {
+    width: 30px;
+    height: 30px;
+  }
+
+  .header-actions { gap: 0; }
+
+  .btn-icon,
+  #btn-new-entry,
+  #btn-new-journey {
+    padding: 0.35rem;
+  }
+
+  .btn-icon svg,
+  #btn-new-entry svg,
+  #btn-new-journey svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+
 /* ── Buttons ────────────────────────────────────────────────────── */
 .btn {
   font-family: var(--font-ui);
