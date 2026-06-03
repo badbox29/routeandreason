@@ -43,6 +43,11 @@
             <circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>
           </svg>
         </button>
+        <button class="btn btn-icon" id="btn-stats" title="Stats dashboard">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+          </svg>
+        </button>
         <button class="btn btn-icon" id="btn-settings" title="Settings">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -743,6 +748,58 @@
   <!-- Dark mode toggle (fixed bottom-right) -->
   <div class="tdnn" onclick="tdnn()">
     <div class="moon"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: Stats Dashboard                                          -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-stats" role="dialog" aria-modal="true" aria-label="Stats Dashboard">
+    <div class="modal modal-stats">
+      <div class="modal-header">
+        <h2 class="modal-title">Your Stats</h2>
+        <div class="modal-header-actions">
+          <button class="modal-close" data-close="modal-stats">✕</button>
+        </div>
+      </div>
+      <div class="modal-body stats-modal-body">
+
+        <!-- Time window tabs -->
+        <div class="stats-tabs">
+          <button class="stats-tab active" data-window="week">This Week</button>
+          <button class="stats-tab" data-window="month">This Month</button>
+          <button class="stats-tab" data-window="year">This Year</button>
+          <button class="stats-tab" data-window="all">All Time</button>
+        </div>
+
+        <!-- Summary row -->
+        <div class="stats-summary-row" id="stats-summary-row"></div>
+
+        <!-- Charts -->
+        <div class="stats-charts">
+          <div class="stats-chart-block">
+            <div class="stats-chart-title">Miles per Week <span class="stats-chart-sub">(last 12 weeks)</span></div>
+            <canvas id="stats-canvas-weekly" height="120"></canvas>
+          </div>
+          <div class="stats-chart-block">
+            <div class="stats-chart-title">Walks by Day of Week</div>
+            <canvas id="stats-canvas-dow" height="120"></canvas>
+          </div>
+        </div>
+
+        <!-- Personal bests + patterns -->
+        <div class="stats-lower">
+          <div class="stats-section">
+            <div class="stats-section-title">Personal Bests</div>
+            <div id="stats-personal-bests"></div>
+          </div>
+          <div class="stats-section">
+            <div class="stats-section-title">Patterns</div>
+            <div id="stats-patterns"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
   </div>
 
   <script src="js/app.js"></script>
