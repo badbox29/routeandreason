@@ -122,6 +122,31 @@
         <div id="saved-routes-list"></div>
       </section>
 
+      <!-- Walk Goals Widget -->
+      <section class="widget goals-widget">
+        <div class="widget-header">
+          <h3 class="widget-title">Weekly Goals</h3>
+          <button class="btn btn-tiny" id="btn-edit-goals">Edit</button>
+        </div>
+        <div id="goals-edit" style="display:none">
+          <div class="goals-edit-row">
+            <label class="goals-edit-label">Miles / week</label>
+            <input type="number" class="input input-tiny" id="goal-miles" min="0" max="200" step="0.5" placeholder="—" />
+          </div>
+          <div class="goals-edit-row">
+            <label class="goals-edit-label">Walks / week</label>
+            <input type="number" class="input input-tiny" id="goal-walks" min="0" max="50" step="1" placeholder="—" />
+          </div>
+          <div class="goals-edit-actions">
+            <button class="btn btn-sm btn-primary" id="btn-save-goals">Save</button>
+            <button class="btn btn-sm btn-ghost" id="btn-cancel-goals">Cancel</button>
+          </div>
+        </div>
+        <div id="goals-display">
+          <div class="widget-empty">Tap Edit to set a weekly goal.</div>
+        </div>
+      </section>
+
       <!-- Elevation Records Widget -->
       <section class="widget elev-records-widget">
         <div class="widget-header">
