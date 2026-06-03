@@ -108,7 +108,7 @@ a:hover { text-decoration: underline; }
   width: 42px;
   height: 42px;
   object-fit: contain;
-  filter: brightness(0) invert(1);
+  mix-blend-mode: screen;
   opacity: 0.9;
 }
 
