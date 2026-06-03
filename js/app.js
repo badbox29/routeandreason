@@ -1140,6 +1140,25 @@ async function fetchAndDrawElevation(routePoints) {
   }
 }
 
+function computeElevStats(elevations) {
+  if (!elevations || elevations.length < 2) return null;
+  let gain = 0, loss = 0;
+  for (let i = 1; i < elevations.length; i++) {
+    const diff = elevations[i].elevation - elevations[i-1].elevation;
+    if (diff > 0) gain += diff;
+    else          loss += Math.abs(diff);
+  }
+  const elev   = elevations.map(e => e.elevation);
+  const high   = Math.max(...elev);
+  const low    = Math.min(...elev);
+  return {
+    elevGainM:  Math.round(gain),
+    elevLossM:  Math.round(loss),
+    elevHighM:  Math.round(high),
+    elevLowM:   Math.round(low),
+  };
+}
+
 function drawElevationProfile(elevations) {
   const container = document.getElementById('elevation-profile');
   const canvas    = document.getElementById('elevation-canvas');
@@ -1184,6 +1203,17 @@ function drawElevationProfile(elevations) {
   ctx.strokeStyle = '#4a7c59';
   ctx.lineWidth = 2;
   ctx.stroke();
+
+  // Update elevation stat slots in stats bar
+  const stats = computeElevStats(elevations);
+  if (stats) {
+    const ftGain = Math.round(stats.elevGainM * 3.28084);
+    const ftHigh = Math.round(stats.elevHighM * 3.28084);
+    document.getElementById('stat-elev-gain').textContent = `${ftGain} ft`;
+    document.getElementById('stat-elev-high').textContent = `${ftHigh} ft`;
+    document.getElementById('stat-elev-gain-item').style.display = '';
+    document.getElementById('stat-elev-high-item').style.display = '';
+  }
 }
 
 function updateStats(distMeters) {
@@ -1258,9 +1288,11 @@ function clearRoute() {
   state.waypoints = [];
   clearMapDrawings();
   updateStats(0);
-  document.getElementById('elevation-profile').style.display = 'none';
-  document.getElementById('btn-close-loop').style.display = 'none';
-  state.elevationData = [];
+  document.getElementById('elevation-profile').style.display      = 'none';
+  document.getElementById('btn-close-loop').style.display         = 'none';
+  document.getElementById('stat-elev-gain-item').style.display    = 'none';
+  document.getElementById('stat-elev-high-item').style.display    = 'none';
+  state.elevationData   = [];
   state.lastRoutePoints = null;
 }
 
@@ -1481,9 +1513,25 @@ document.getElementById('btn-save-journey').addEventListener('click', async () =
     connections:  [],
     // Route attribution
     _sourceRouteRef: state.prefillSourceRef || null,
+    // Elevation stats (populated below if elevation data is available)
+    elevGainM: null,
+    elevLossM: null,
+    elevHighM: null,
+    elevLowM:  null,
     // Mentions — resolved below
     mentions: [],
   };
+
+  // Compute and attach elevation stats if available
+  if (state.elevationData && state.elevationData.length >= 2) {
+    const es = computeElevStats(state.elevationData);
+    if (es) {
+      entry.elevGainM = es.elevGainM;
+      entry.elevLossM = es.elevLossM;
+      entry.elevHighM = es.elevHighM;
+      entry.elevLowM  = es.elevLowM;
+    }
+  }
 
   // Resolve @mentions and store them on the entry
   const mentionedNames = parseMentions(entry.notes);
@@ -1518,6 +1566,7 @@ document.getElementById('btn-save-journey').addEventListener('click', async () =
     };
     await saveRoute(route);
     renderSavedRoutes();
+  renderElevationRecords();
   }
 
   await saveEntry(entry);
@@ -2092,6 +2141,7 @@ function openViewModal(entry) {
       };
       await saveRoute(route);
       renderSavedRoutes();
+  renderElevationRecords();
       bookmarkBtn.textContent = 'Bookmarked ✓';
       bookmarkBtn.disabled    = true;
       showToast(`Route bookmarked ✓`);
@@ -2261,8 +2311,47 @@ document.querySelectorAll('.route-tab').forEach(btn => {
   btn.addEventListener('click', () => {
     state.activeRouteTab = btn.dataset.tab;
     renderSavedRoutes();
+  renderElevationRecords();
   });
 });
+
+// ─── Elevation Records Widget ──────────────────────────────────────
+
+function renderElevationRecords() {
+  const el = document.getElementById('elev-records-list');
+  const entries = state.entries.filter(e => e.type === 'journey' && e.elevGainM != null);
+
+  if (entries.length === 0) {
+    el.innerHTML = '<div class="widget-empty">Log a journey with elevation enabled to see records here.</div>';
+    return;
+  }
+
+  const metersToFt = m => Math.round(m * 3.28084);
+
+  // Find records
+  const mostGain  = entries.reduce((a, b) => (b.elevGainM > a.elevGainM ? b : a));
+  const highestPt = entries.reduce((a, b) => (b.elevHighM > a.elevHighM ? b : a));
+  const mostLoss  = entries.reduce((a, b) => (b.elevLossM > a.elevLossM ? b : a));
+
+  const records = [
+    { label: '↑ Most Climb',    value: `${metersToFt(mostGain.elevGainM)} ft`,  entry: mostGain },
+    { label: '⬆ Highest Point', value: `${metersToFt(highestPt.elevHighM)} ft`, entry: highestPt },
+    { label: '↓ Most Descent',  value: `${metersToFt(mostLoss.elevLossM)} ft`,  entry: mostLoss },
+  ];
+
+  el.innerHTML = records.map((r, i) => `
+    <div class="elev-record-item" data-idx="${i}">
+      <div class="elev-record-label">${r.label}</div>
+      <div class="elev-record-value">${r.value}</div>
+      <div class="elev-record-name">${escapeHtml(r.entry.name || 'Untitled Walk')}</div>
+      <div class="elev-record-date">${formatDate(r.entry.datetime)}</div>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.elev-record-item').forEach((item, i) => {
+    item.addEventListener('click', () => openViewModal(records[i].entry));
+  });
+}
 
 async function deleteRoute(id) {
   state.savedRoutes = state.savedRoutes.filter(r => r.id !== id);
@@ -2291,6 +2380,7 @@ function promptDeleteRouteModal(route) {
     await deleteRoute(route.id);
     closeModal('modal-delete-route');
     renderSavedRoutes();
+  renderElevationRecords();
     showToast('Route deleted');
   });
 
@@ -2357,6 +2447,7 @@ document.getElementById('btn-import-token').addEventListener('click', () => {
       renderFeed();
       renderSpotlight();
       renderSavedRoutes();
+  renderElevationRecords();
       renderWeatherSidebar();
       updateFriendsBadge();
     });
@@ -2444,6 +2535,7 @@ document.getElementById('btn-save-settings').addEventListener('click', async () 
       renderFeed();
       renderSpotlight();
       renderSavedRoutes();
+  renderElevationRecords();
       renderWeatherSidebar();
       updateWorkerDependentToggles();
       updateFriendsBadge();
@@ -2914,6 +3006,7 @@ async function init() {
   renderFeed();
   renderSpotlight();
   renderSavedRoutes();
+  renderElevationRecords();
   renderWeatherSidebar();
   updateWorkerDependentToggles();
   updateFriendsBadge();
