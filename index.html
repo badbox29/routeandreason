@@ -42,7 +42,7 @@
           </svg>
           <span class="btn-label">Log a Journey</span>
         </button>
-        <button class="btn btn-icon btn-friends" id="btn-friends" title="Friends">
+        <button class="btn btn-icon btn-friends" id="btn-friends" title="Social">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
           </svg>
@@ -692,13 +692,13 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════ -->
-  <!-- MODAL: Friends                                                 -->
+  <!-- MODAL: Social                                                   -->
   <!-- ═══════════════════════════════════════════════════════════════ -->
-  <div class="modal-overlay" id="modal-friends" role="dialog" aria-modal="true" aria-label="Friends">
+  <div class="modal-overlay" id="modal-friends" role="dialog" aria-modal="true" aria-label="Social">
     <div class="modal modal-friends">
       <div class="modal-header">
         <div>
-          <h2 class="modal-title">Friends</h2>
+          <h2 class="modal-title">Social</h2>
           <div class="friends-modal-username" id="friends-modal-username"></div>
         </div>
         <button class="modal-close" data-close="modal-friends">✕</button>
@@ -716,6 +716,10 @@
         </button>
         <button class="friends-tab" data-tab="friends-search">
           Search
+        </button>
+        <button class="friends-tab" data-tab="friends-notifications">
+          Notifications
+          <span class="tab-badge" id="tab-badge-notifications" style="display:none"></span>
         </button>
       </div>
 
@@ -749,6 +753,13 @@
           <button class="btn btn-sm btn-primary" id="btn-friend-search">Search</button>
         </div>
         <div id="friend-search-results"></div>
+      </div>
+
+      <!-- Tab: Notifications -->
+      <div class="friends-tab-panel" id="friends-notifications">
+        <div id="notifications-content">
+          <div class="widget-empty">No notifications yet.</div>
+        </div>
       </div>
 
     </div>
