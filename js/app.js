@@ -240,23 +240,31 @@ function slopeColor(pct) {
 // ─── Settings / Persistence (localStorage) ────────────────────────
 
 function loadSettings() {
-  state.token      = localStorage.getItem('wj_token') || generateToken();
-  state.workerUrl  = localStorage.getItem('wj_worker') || '';
+  const raw_token  = localStorage.getItem('wj_token');
+  const raw_worker = localStorage.getItem('wj_worker');
+  state.token      = (raw_token  && raw_token  !== 'null') ? raw_token  : generateToken();
+  state.workerUrl  = (raw_worker && raw_worker !== 'null') ? raw_worker : '';
   state.pageSize   = parseInt(localStorage.getItem('wj_page_size') || '20', 10);
   state.weatherLocs = JSON.parse(localStorage.getItem('wj_weather_locs') || '[]');
   state.weightLbs  = parseFloat(localStorage.getItem('wj_weight')  || '0') || null;
   state.heightIn   = parseFloat(localStorage.getItem('wj_height')  || '0') || null;
   state.ageyears   = parseFloat(localStorage.getItem('wj_age')     || '0') || null;
   state.sex        = localStorage.getItem('wj_sex') || null;
-  state.username   = localStorage.getItem('wj_username') || null;
+  const raw_user   = localStorage.getItem('wj_username');
+  state.username   = (raw_user && raw_user !== 'null') ? raw_user : null;
   state.lastSeenFriends = JSON.parse(localStorage.getItem('wj_last_seen') || '{}');
   state.darkMode   = localStorage.getItem('wj_dark') === 'true';
+  // Clean up any string "null" values that may have been written previously
+  if (raw_token  === 'null') localStorage.removeItem('wj_token');
+  if (raw_worker === 'null') localStorage.removeItem('wj_worker');
+  if (raw_user   === 'null') localStorage.removeItem('wj_username');
   localStorage.setItem('wj_token', state.token);
 }
 
 function saveSettings() {
-  localStorage.setItem('wj_token',      state.token);
-  localStorage.setItem('wj_worker',     state.workerUrl);
+  if (state.token)     localStorage.setItem('wj_token',      state.token);
+  if (state.workerUrl) localStorage.setItem('wj_worker',     state.workerUrl);
+  else                 localStorage.removeItem('wj_worker');
   localStorage.setItem('wj_page_size',  state.pageSize);
   localStorage.setItem('wj_weather_locs', JSON.stringify(state.weatherLocs));
   if (state.weightLbs) localStorage.setItem('wj_weight', state.weightLbs);
@@ -1067,7 +1075,10 @@ function addWaypoint(latlng) {
 
 // One-time backfill: compute elevation stats for existing entries that lack them
 async function backfillElevationStats() {
-  if (!state.workerUrl) return;
+  if (!state.workerUrl) {
+    console.log('[Elevation backfill] Skipped — no worker URL');
+    return;
+  }
 
   const needsBackfill = state.entries.filter(e =>
     e.type === 'journey' &&
@@ -1075,14 +1086,16 @@ async function backfillElevationStats() {
     e.elevGainM == null
   );
 
-  if (needsBackfill.length === 0) return;
+  console.log(`[Elevation backfill] Found ${needsBackfill.length} entries needing backfill (of ${state.entries.length} total)`);
 
-  console.log(`[Elevation backfill] Backfilling ${needsBackfill.length} entries…`);
+  if (needsBackfill.length === 0) return;
 
   for (const entry of needsBackfill) {
     try {
       const sample = samplePoints(entry.waypoints, 100);
+      console.log(`[Elevation backfill] Fetching elevation for "${entry.name}" (${sample.length} points)`);
       const elevations = await workerFetch('/elevation', 'POST', { locations: sample });
+      console.log(`[Elevation backfill] Got ${elevations?.length} elevation points`);
       const stats = computeElevStats(elevations);
       if (stats) {
         entry.elevGainM = stats.elevGainM;
@@ -1090,11 +1103,14 @@ async function backfillElevationStats() {
         entry.elevHighM = stats.elevHighM;
         entry.elevLowM  = stats.elevLowM;
         await saveEntry(entry);
+        console.log(`[Elevation backfill] Saved stats for "${entry.name}": gain=${stats.elevGainM}m high=${stats.elevHighM}m`);
+      } else {
+        console.warn(`[Elevation backfill] computeElevStats returned null for "${entry.name}"`);
       }
       // Small delay between calls to avoid hammering the API
       await new Promise(r => setTimeout(r, 300));
     } catch(e) {
-      console.warn(`[Elevation backfill] Failed for entry ${entry.id}:`, e.message);
+      console.warn(`[Elevation backfill] Failed for entry "${entry.name}":`, e.message);
     }
   }
 
