@@ -274,7 +274,7 @@ async function handleSurface(request, env, url) {
     return errorResponse(400, "Invalid bbox format");
   }
 
-  const query = `[out:json][timeout:15];(way["surface"](${minLat},${minLng},${maxLat},${maxLng});way["highway"~"^(footway|path|track|bridleway)$"](${minLat},${minLng},${maxLat},${maxLng}););out geom;`;
+  const query = `[out:json][timeout:15];(way["surface"](${minLat},${minLng},${maxLat},${maxLng});way["highway"~"^(footway|path|track|bridleway|primary|secondary|tertiary|residential|unclassified|service|motorway|trunk)$"](${minLat},${minLng},${maxLat},${maxLng}););out geom;`;
 
   // Try primary Overpass endpoint, fall back to secondary
   const endpoints = [
@@ -292,10 +292,20 @@ async function handleSurface(request, env, url) {
 
   // Infer surface from highway type when no surface tag present
   const HIGHWAY_SURFACE = {
-    footway:   'unpaved',
-    path:      'unpaved',
-    track:     'dirt',
-    bridleway: 'dirt',
+    // Paved roads
+    motorway:     'paved',
+    trunk:        'paved',
+    primary:      'paved',
+    secondary:    'paved',
+    tertiary:     'paved',
+    residential:  'paved',
+    unclassified: 'paved',
+    service:      'paved',
+    // Unpaved paths
+    footway:      'unpaved',
+    path:         'unpaved',
+    track:        'dirt',
+    bridleway:    'dirt',
   };
 
   let lastError = null;
