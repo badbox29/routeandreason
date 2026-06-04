@@ -72,6 +72,7 @@ const state = {
   mentionCache:    {},          // { username: { token, found } } to avoid re-lookups
   mutualWalkEntries: [],        // mutual walk prompts fetched from KV
   goals:           {},          // { miles, walks } weekly targets
+  syncQueue:       [],          // pending KV write operations
   // Social
   username:    null,     // this user's chosen username
   friends:     [],       // [{username, token}] confirmed friends
@@ -850,6 +851,71 @@ function updateFriendsBadge() {
   }
 }
 
+// ─── Sync Queue ───────────────────────────────────────────────────
+// Queues failed KV writes for retry. One operation per entry ID —
+// edits replace prior saves, deletes cancel pending saves.
+
+function loadSyncQueue() {
+  try {
+    state.syncQueue = JSON.parse(localStorage.getItem('wj_sync_queue') || '[]');
+  } catch(e) {
+    state.syncQueue = [];
+  }
+}
+
+function saveSyncQueue() {
+  localStorage.setItem('wj_sync_queue', JSON.stringify(state.syncQueue));
+}
+
+function queueEntryOp(entry) {
+  // Remove any existing op for this ID, then push save op
+  state.syncQueue = state.syncQueue.filter(op => op.id !== entry.id);
+  state.syncQueue.push({ type: 'save', id: entry.id, entry, queuedAt: Date.now() });
+  saveSyncQueue();
+}
+
+function queueDeleteOp(id) {
+  // If there's a pending save for this ID, remove it — no point syncing a deleted entry
+  const hadPendingSave = state.syncQueue.some(op => op.id === id && op.type === 'save');
+  state.syncQueue = state.syncQueue.filter(op => op.id !== id);
+  // Only queue the delete if the entry was already synced (i.e. no pending save)
+  if (!hadPendingSave) {
+    state.syncQueue.push({ type: 'delete', id, queuedAt: Date.now() });
+  }
+  saveSyncQueue();
+}
+
+function isQueued(entryId) {
+  return state.syncQueue.some(op => op.id === entryId);
+}
+
+async function drainSyncQueue() {
+  if (!state.workerUrl || state.syncQueue.length === 0) return;
+
+  const queue = [...state.syncQueue]; // snapshot
+  let changed  = false;
+
+  for (const op of queue) {
+    try {
+      if (op.type === 'save') {
+        await kvPut(`entry/${op.id}`, op.entry);
+      } else if (op.type === 'delete') {
+        await workerFetch(`/storage/${state.token}/entry/${op.id}`, 'DELETE');
+      }
+      // Success — remove from queue
+      state.syncQueue = state.syncQueue.filter(q => q.id !== op.id);
+      changed = true;
+    } catch(e) {
+      // Still offline or error — leave in queue
+    }
+  }
+
+  if (changed) {
+    saveSyncQueue();
+    renderFeed(); // refresh badges
+  }
+}
+
 // ─── Entry Storage ────────────────────────────────────────────────
 // KV is always the source of truth when a worker URL is set.
 // localStorage is a write-through cache used as a fallback when
@@ -899,8 +965,14 @@ async function saveEntry(entry) {
   if (state.workerUrl) {
     try {
       await kvPut(`entry/${entry.id}`, entry);
+      // Success — remove from sync queue if it was queued
+      if (isQueued(entry.id)) {
+        state.syncQueue = state.syncQueue.filter(op => op.id !== entry.id);
+        saveSyncQueue();
+      }
     } catch(e) {
-      console.warn('Worker save failed, entry kept in local cache:', e.message);
+      console.warn('Worker save failed — queuing for sync:', e.message);
+      queueEntryOp(entry);
     }
 
     // Sync public discovery index
@@ -944,8 +1016,12 @@ async function deleteEntry(id) {
   if (state.workerUrl) {
     try {
       await workerFetch(`/storage/${state.token}/entry/${id}`, 'DELETE');
+      // Success — remove from sync queue
+      state.syncQueue = state.syncQueue.filter(op => op.id !== id);
+      saveSyncQueue();
     } catch(e) {
-      console.warn('Worker delete failed:', e.message);
+      console.warn('Worker delete failed — queuing for sync:', e.message);
+      queueDeleteOp(id);
     }
     // Remove from public index (silent — may not exist)
     try {
@@ -2015,6 +2091,10 @@ function buildEntryCard(entry, animIdx) {
   if (entry.visibility === 'public') tags.push(`<span class="tag tag-public">🌍 Public</span>`);
 
   const newDot = (entry._isNew && isFriend) ? '<span class="entry-new-dot" title="New"></span>' : '';
+  const pendingBadge = (!entry._isFriend && isQueued(entry.id))
+    ? '<div class="sync-pending-badge">⏳ Pending sync</div>'
+    : '';
+
   card.innerHTML = `
     <div class="entry-card-header">
       <div class="entry-card-title">${escapeHtml(title)}${newDot}</div>
@@ -2022,6 +2102,7 @@ function buildEntryCard(entry, animIdx) {
     </div>
     <div class="entry-card-meta">${tags.join('')}</div>
     ${entry.notes ? `<div class="entry-card-excerpt">${escapeHtml(entry.notes)}</div>` : ''}
+    ${pendingBadge}
   `;
 
   card.addEventListener('click', () => openViewModal(entry));
@@ -3765,6 +3846,7 @@ async function doFriendSearch() {
 async function init() {
   loadSettings();
   loadGoals();
+  loadSyncQueue();
   applyDarkMode();  // apply before any KV fetch to avoid flash
 
   if (state.workerUrl) {
@@ -3796,6 +3878,13 @@ async function init() {
 
   // Poll for new friend requests every 60 seconds
   setInterval(refreshFriendsBadge, 60000);
+
+  // Drain sync queue on reconnect and every 30 seconds
+  window.addEventListener('online', () => drainSyncQueue());
+  setInterval(drainSyncQueue, 30000);
+
+  // Attempt initial drain in case items were queued in a previous session
+  drainSyncQueue();
 }
 
 init();
