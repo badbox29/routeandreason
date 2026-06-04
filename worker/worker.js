@@ -274,7 +274,29 @@ async function handleSurface(request, env, url) {
     return errorResponse(400, "Invalid bbox format");
   }
 
-  const query = `[out:json][timeout:15];way["surface"](${minLat},${minLng},${maxLat},${maxLng});out geom;`;
+  const query = `[out:json][timeout:15];(way["surface"](${minLat},${minLng},${maxLat},${maxLng});way["highway"~"^(footway|path|track|bridleway)$"](${minLat},${minLng},${maxLat},${maxLng}););out geom;`;
+
+  // Try primary Overpass endpoint, fall back to secondary
+  const endpoints = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+  ];
+
+  const SURFACE_MAP = {
+    asphalt: 'paved', concrete: 'paved', paving_stones: 'paved', sett: 'paved',
+    paved: 'paved', cobblestone: 'paved', metal: 'paved',
+    gravel: 'gravel', fine_gravel: 'gravel', compacted: 'gravel', pebblestone: 'gravel',
+    dirt: 'dirt', earth: 'dirt', mud: 'dirt', grass: 'dirt', ground: 'dirt',
+    unpaved: 'unpaved', sand: 'unpaved', woodchips: 'unpaved',
+  };
+
+  // Infer surface from highway type when no surface tag present
+  const HIGHWAY_SURFACE = {
+    footway:   'unpaved',
+    path:      'unpaved',
+    track:     'dirt',
+    bridleway: 'dirt',
+  };
 
   // Try primary Overpass endpoint, fall back to secondary
   const endpoints = [
@@ -303,21 +325,22 @@ async function handleSurface(request, env, url) {
 
       const data = await res.json();
 
-      const SURFACE_MAP = {
-        asphalt: 'paved', concrete: 'paved', paving_stones: 'paved', sett: 'paved',
-        paved: 'paved', cobblestone: 'paved', metal: 'paved',
-        gravel: 'gravel', fine_gravel: 'gravel', compacted: 'gravel', pebblestone: 'gravel',
-        dirt: 'dirt', earth: 'dirt', mud: 'dirt', grass: 'dirt', ground: 'dirt',
-        unpaved: 'unpaved', sand: 'unpaved', woodchips: 'unpaved',
-      };
-
       const ways = (data.elements || [])
-        .filter(e => e.type === 'way' && e.geometry && e.tags?.surface)
-        .map(e => ({
-          surface:    SURFACE_MAP[e.tags.surface] || 'unpaved',
-          rawSurface: e.tags.surface,
-          geometry:   e.geometry.map(n => ({ lat: n.lat, lng: n.lon })),
-        }));
+        .filter(e => e.type === 'way' && e.geometry && (e.tags?.surface || e.tags?.highway))
+        .map(e => {
+          let surface;
+          if (e.tags?.surface) {
+            surface = SURFACE_MAP[e.tags.surface] || 'unpaved';
+          } else {
+            // No surface tag — infer from highway type
+            surface = HIGHWAY_SURFACE[e.tags?.highway] || 'unpaved';
+          }
+          return {
+            surface,
+            rawSurface: e.tags?.surface || `inferred:${e.tags?.highway}`,
+            geometry:   e.geometry.map(n => ({ lat: n.lat, lng: n.lon })),
+          };
+        });
 
       return jsonResponse({ ways }, request);
 
