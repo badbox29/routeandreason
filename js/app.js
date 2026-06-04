@@ -70,6 +70,7 @@ const state = {
   prefillSourceRef: null,      // { entryId, friendToken, username } when using a friend's route
   mentionEntries:  [],          // mention notifications fetched from KV
   mentionCache:    {},          // { username: { token, found } } to avoid re-lookups
+  mutualWalkEntries: [],        // mutual walk prompts fetched from KV
   goals:           {},          // { miles, walks } weekly targets
   // Social
   username:    null,     // this user's chosen username
@@ -316,13 +317,11 @@ async function saveProfileToKV() {
     let existing = {};
     try { existing = (await kvGet('profile')) || {}; } catch(e) { /* first save */ }
 
-    // Never overwrite a non-empty friends list with an empty one —
-    // guards against a KV read failure during deployment causing data loss.
-    // But incomingReqs and outgoingReqs MUST always use current state,
-    // since they can legitimately be empty after approvals/cancellations.
-    const friends      = state.friends.length ? state.friends : (existing.friends || []);
-    const incomingReqs = state.incomingReqs;
-    const outgoingReqs = state.outgoingReqs;
+    // Never overwrite a non-empty friends/requests list with an empty one.
+    // This guards against a KV read failure during deployment causing data loss.
+    const friends      = state.friends.length      ? state.friends      : (existing.friends      || []);
+    const incomingReqs = state.incomingReqs.length  ? state.incomingReqs  : (existing.incomingReqs  || []);
+    const outgoingReqs = state.outgoingReqs.length  ? state.outgoingReqs  : (existing.outgoingReqs  || []);
 
     const merged = {
       username:     state.username    ?? existing.username    ?? null,
@@ -374,11 +373,7 @@ async function loadProfileFromKV() {
       }
     }
 
-    if (Array.isArray(profile.incomingReqs)) {
-      // Filter out requests from already-confirmed friends (KV eventual consistency guard)
-      const friendTokens = new Set(state.friends.map(f => f.token));
-      state.incomingReqs = profile.incomingReqs.filter(r => !friendTokens.has(r.token));
-    }
+    if (Array.isArray(profile.incomingReqs)) state.incomingReqs = profile.incomingReqs;
     if (Array.isArray(profile.outgoingReqs)) state.outgoingReqs = profile.outgoingReqs;
     if (profile.darkMode != null) state.darkMode = profile.darkMode;
     // Sync merged state to localStorage as cache
@@ -508,6 +503,49 @@ async function sendMentionNotification(targetToken, entryId, preview) {
 function parseMentions(text) {
   const matches = text.match(/@([a-zA-Z0-9_-]{3,32})/g) || [];
   return [...new Set(matches.map(m => m.slice(1).toLowerCase()))];
+}
+
+// Load mutual walk prompts from this user's own KV
+async function loadMutualWalkEntries() {
+  state.mutualWalkEntries = [];
+  if (!state.workerUrl || !state.token) return;
+  try {
+    const data = await workerFetch(`/storage/${state.token}`);
+    const keys = (data.keys || []).filter(k => k.key.startsWith('mutualwalk/'));
+    const entries = await Promise.all(
+      keys.map(k =>
+        workerFetch(`/storage/${state.token}/${k.key}`)
+          .then(d => d.value)
+          .catch(() => null)
+      )
+    );
+    state.mutualWalkEntries = entries.filter(Boolean);
+  } catch(e) {
+    console.warn('Could not load mutual walk entries:', e.message);
+  }
+}
+
+// Send a mutual walk notification to a tagged user's KV space
+async function sendMutualWalkNotification(targetToken, entry) {
+  if (!state.workerUrl || !state.username) return;
+  try {
+    const url = state.workerUrl.replace(/\/$/, '') + `/notify/${encodeURIComponent(targetToken)}`;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type:         'mutualwalk',
+        entryId:      entry.id,
+        entryName:    entry.name || '',
+        fromUsername: state.username,
+        fromToken:    state.token,
+        preview:      (entry.notes || '').slice(0, 120),
+        waypoints:    entry.waypoints || [],
+      }),
+    });
+  } catch(e) {
+    console.warn('Mutual walk notification failed:', e.message);
+  }
 }
 
 // ─── Mention autocomplete ─────────────────────────────────────────
@@ -706,7 +744,7 @@ async function confirmFriendship(req) {
   state.outgoingReqs = state.outgoingReqs.filter(r => r.token !== req.token);
   await saveProfileToKV();
 
-  // Write us to their friends list and clean up their outgoing AND incoming
+  // Write us to their friends list and clean up their outgoing
   try {
     const theirProfile = await workerFetch(`/storage/${req.token}/profile`)
       .then(d => d.value).catch(() => null);
@@ -715,10 +753,8 @@ async function confirmFriendship(req) {
       if (!theirFriends.find(f => f.token === state.token)) {
         theirFriends.push({ username: state.username, token: state.token, since: now });
       }
-      // Clean up their outgoing (they sent to us) and their incoming (we sent to them)
       const theirOutgoing = (theirProfile.outgoingReqs || []).filter(r => r.token !== state.token);
-      const theirIncoming = (theirProfile.incomingReqs || []).filter(r => r.token !== state.token);
-      const updated = { ...theirProfile, friends: theirFriends, outgoingReqs: theirOutgoing, incomingReqs: theirIncoming };
+      const updated = { ...theirProfile, friends: theirFriends, outgoingReqs: theirOutgoing };
       await workerFetch(`/storage/${req.token}/profile`, 'PUT', updated);
     }
   } catch(e) {
@@ -761,14 +797,7 @@ async function refreshFriendsBadge() {
   try {
     const profile = await kvGet('profile');
     if (profile?.incomingReqs) {
-      // Filter out any requests from people already confirmed as friends
-      // This guards against KV eventual consistency returning stale data
-      const friendTokens = new Set(state.friends.map(f => f.token));
-      state.incomingReqs = profile.incomingReqs.filter(r => !friendTokens.has(r.token));
-      // If we filtered any out, write the clean version back to KV
-      if (state.incomingReqs.length < profile.incomingReqs.length) {
-        saveProfileToKV().catch(() => {});
-      }
+      state.incomingReqs = profile.incomingReqs;
     }
     updateFriendsBadge();
   } catch(e) { /* silent */ }
@@ -1618,6 +1647,10 @@ document.getElementById('btn-save-journey').addEventListener('click', async () =
     for (const m of entry.mentions) {
       if (m.token !== state.token) {
         sendMentionNotification(m.token, entry.id, preview);
+        // If this is a journey with a route, also send a mutual walk prompt
+        if (entry.type === 'journey' && entry.waypoints && entry.waypoints.length >= 2) {
+          sendMutualWalkNotification(m.token, entry);
+        }
       }
     }
   }
@@ -1897,6 +1930,18 @@ function renderFeed() {
     });
   }
 
+  // Mutual walk entries — walk prompts from companions who logged a shared walk
+  if (state.mutualWalkEntries.length > 0) {
+    const header = document.createElement('div');
+    header.className = 'mentions-section-header';
+    header.textContent = `Walks you were on (${state.mutualWalkEntries.length})`;
+    feed.appendChild(header);
+    state.mutualWalkEntries.forEach((m, i) => {
+      const card = buildMutualWalkCard(m, i);
+      feed.appendChild(card);
+    });
+  }
+
   renderPagination(totalPages);
 }
 
@@ -1950,6 +1995,41 @@ function buildMentionCard(mention, animIdx) {
     </div>
     ${mention.preview ? `<div class="entry-card-excerpt">${escapeHtml(mention.preview)}</div>` : ''}
   `;
+  return card;
+}
+
+function buildMutualWalkCard(entry, animIdx) {
+  const card = document.createElement('div');
+  card.className = 'entry-card type-mutualwalk';
+  card.style.animationDelay = `${animIdx * 0.04}s`;
+
+  const hasRoute = entry.waypoints && entry.waypoints.length >= 2;
+  const name     = entry.entryName || 'a walk';
+
+  card.innerHTML = `
+    <div class="entry-card-header">
+      <div class="entry-card-title">🚶 Walk with @${escapeHtml(entry.fromUsername)}</div>
+      <div class="entry-card-date">${formatDate(entry.createdAt)}</div>
+    </div>
+    <div class="entry-card-meta">
+      <span class="tag tag-mutualwalk">👣 Mutual Walk</span>
+    </div>
+    <div class="entry-card-excerpt">@${escapeHtml(entry.fromUsername)} logged "${escapeHtml(name)}" — a walk you were part of.</div>
+    ${hasRoute ? `<div class="mutualwalk-actions"><button class="btn btn-sm btn-primary mutualwalk-log-btn">Log my version</button></div>` : ''}
+  `;
+
+  if (hasRoute) {
+    card.querySelector('.mutualwalk-log-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      openJourneyModal({
+        waypoints:      entry.waypoints,
+        _sourceEntryId: entry.entryId,
+        _fromUsername:  entry.fromUsername,
+        _friendToken:   entry.fromToken,
+      });
+    });
+  }
+
   return card;
 }
 
@@ -3050,6 +3130,7 @@ document.getElementById('btn-import-token').addEventListener('click', () => {
     loadEntries().then(async () => {
       await loadFriendEntries();
       await loadMentionEntries();
+  await loadMutualWalkEntries();
       renderFeed();
       renderSpotlight();
       renderSavedRoutes();
@@ -3139,6 +3220,7 @@ document.getElementById('btn-save-settings').addEventListener('click', async () 
       await loadEntries();
       await loadFriendEntries();
       await loadMentionEntries();
+  await loadMutualWalkEntries();
       renderFeed();
       renderSpotlight();
       renderSavedRoutes();
@@ -3415,6 +3497,7 @@ function renderRequestsPanels() {
         await confirmFriendship(req);
         await loadFriendEntries();
         await loadMentionEntries();
+  await loadMutualWalkEntries();
         renderFriendsModal();
         renderFeed();
         showToast(`@${req.username} added as a friend ✓`);
@@ -3521,6 +3604,7 @@ async function doFriendSearch() {
         if (res.autoConfirmed) {
           await loadFriendEntries();
           await loadMentionEntries();
+  await loadMutualWalkEntries();
           renderFriendsModal();
           renderFeed();
           showToast(`@${result.username} added — mutual request detected ✓`);
@@ -3571,6 +3655,7 @@ async function init() {
   await loadEntries();
   await loadFriendEntries();
   await loadMentionEntries();
+  await loadMutualWalkEntries();
 
   renderFeed();
   renderSpotlight();
