@@ -396,6 +396,7 @@ a:hover { text-decoration: underline; }
   transition: var(--transition);
   box-shadow: var(--shadow-sm);
   animation: fadeUp 0.3s ease both;
+  position: relative;
 }
 
 .entry-card:hover {
@@ -1777,6 +1778,20 @@ a:hover { text-decoration: underline; }
 
 .entry-card.type-mention { border-left: 3px solid #1a56b0; }
 .tag-mention-feed { background: #e8f0fe; color: #1a56b0; }
+
+/* ── Sync pending badge ──────────────────────────────────────────── */
+.sync-pending-badge {
+  position: absolute;
+  bottom: 0.6rem;
+  right: 0.75rem;
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+  background: var(--parchment-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  pointer-events: none;
+}
 
 /* ── Mutual walk cards ───────────────────────────────────────────── */
 .entry-card.type-mutualwalk { border-left: 3px solid #2e7d4f; }
