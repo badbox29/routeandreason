@@ -818,21 +818,35 @@ async function refreshFriendsBadge() {
 }
 
 function updateFriendsBadge() {
-  const count = state.incomingReqs.length;
+  const reqCount  = state.incomingReqs.length;
+  const notifCount = state.mentionEntries.length + state.mutualWalkEntries.length;
+  const totalCount = reqCount + notifCount;
+
+  // Header badge — total of requests + notifications
   const badge = document.getElementById('friends-badge');
-  if (count > 0) {
-    badge.textContent = count > 9 ? '9+' : count;
+  if (totalCount > 0) {
+    badge.textContent = totalCount > 9 ? '9+' : totalCount;
     badge.style.display = 'flex';
   } else {
     badge.style.display = 'none';
   }
-  // Also update requests tab badge
-  const tabBadge = document.getElementById('tab-badge-requests');
-  if (count > 0) {
-    tabBadge.textContent = count > 9 ? '9+' : count;
-    tabBadge.style.display = 'inline-flex';
+
+  // Requests tab badge
+  const tabBadgeReq = document.getElementById('tab-badge-requests');
+  if (reqCount > 0) {
+    tabBadgeReq.textContent = reqCount > 9 ? '9+' : reqCount;
+    tabBadgeReq.style.display = 'inline-flex';
   } else {
-    tabBadge.style.display = 'none';
+    tabBadgeReq.style.display = 'none';
+  }
+
+  // Notifications tab badge
+  const tabBadgeNotif = document.getElementById('tab-badge-notifications');
+  if (notifCount > 0) {
+    tabBadgeNotif.textContent = notifCount > 9 ? '9+' : notifCount;
+    tabBadgeNotif.style.display = 'inline-flex';
+  } else {
+    tabBadgeNotif.style.display = 'none';
   }
 }
 
@@ -1949,7 +1963,7 @@ function renderFeed() {
   const pager  = document.getElementById('pagination');
   const all    = filteredEntries();
 
-  if (all.length === 0 && state.mentionEntries.length === 0) {
+  if (all.length === 0) {
     feed.innerHTML = '';
     if (empty) {
       empty.style.display = 'block';
@@ -1974,30 +1988,6 @@ function renderFeed() {
     const card = buildEntryCard(entry, i);
     feed.appendChild(card);
   });
-
-  // Mention entries — always shown below the main feed, no pagination
-  if (state.mentionEntries.length > 0) {
-    const header = document.createElement('div');
-    header.className = 'mentions-section-header';
-    header.textContent = `You were mentioned (${state.mentionEntries.length})`;
-    feed.appendChild(header);
-    state.mentionEntries.forEach((m, i) => {
-      const card = buildMentionCard(m, i);
-      feed.appendChild(card);
-    });
-  }
-
-  // Mutual walk entries — walk prompts from companions who logged a shared walk
-  if (state.mutualWalkEntries.length > 0) {
-    const header = document.createElement('div');
-    header.className = 'mentions-section-header';
-    header.textContent = `Walks you were on (${state.mutualWalkEntries.length})`;
-    feed.appendChild(header);
-    state.mutualWalkEntries.forEach((m, i) => {
-      const card = buildMutualWalkCard(m, i);
-      feed.appendChild(card);
-    });
-  }
 
   renderPagination(totalPages);
 }
@@ -3189,6 +3179,7 @@ document.getElementById('btn-import-token').addEventListener('click', () => {
       await loadFriendEntries();
       await loadMentionEntries();
   await loadMutualWalkEntries();
+  updateFriendsBadge();
       renderFeed();
       renderSpotlight();
       renderSavedRoutes();
@@ -3279,6 +3270,7 @@ document.getElementById('btn-save-settings').addEventListener('click', async () 
       await loadFriendEntries();
       await loadMentionEntries();
   await loadMutualWalkEntries();
+  updateFriendsBadge();
       renderFeed();
       renderSpotlight();
       renderSavedRoutes();
@@ -3494,7 +3486,79 @@ function renderFriendsModal() {
   }
   renderFriendsList();
   renderRequestsPanels();
+  renderNotificationsPanel();
   updateFriendsBadge();
+}
+
+function renderNotificationsPanel() {
+  const el = document.getElementById('notifications-content');
+  const mentions    = state.mentionEntries   || [];
+  const mutualWalks = state.mutualWalkEntries || [];
+
+  if (mentions.length === 0 && mutualWalks.length === 0) {
+    el.innerHTML = '<div class="widget-empty">No notifications yet.</div>';
+    return;
+  }
+
+  el.innerHTML = '';
+
+  // Mention notifications
+  if (mentions.length > 0) {
+    const header = document.createElement('div');
+    header.className = 'friends-section-heading';
+    header.textContent = `Mentions (${mentions.length})`;
+    el.appendChild(header);
+
+    mentions.forEach(m => {
+      const item = document.createElement('div');
+      item.className = 'notification-item';
+      item.innerHTML = `
+        <div class="notification-icon">💬</div>
+        <div class="notification-body">
+          <div class="notification-title">Mentioned by @${escapeHtml(m.fromUsername)}</div>
+          <div class="notification-preview">${escapeHtml(m.preview || '')}</div>
+          <div class="notification-date">${formatDate(m.createdAt)}</div>
+        </div>
+      `;
+      el.appendChild(item);
+    });
+  }
+
+  // Mutual walk notifications
+  if (mutualWalks.length > 0) {
+    const header = document.createElement('div');
+    header.className = 'friends-section-heading';
+    header.style.marginTop = mentions.length ? '1rem' : '0';
+    header.textContent = `Walks you were on (${mutualWalks.length})`;
+    el.appendChild(header);
+
+    mutualWalks.forEach(m => {
+      const hasRoute = m.waypoints && m.waypoints.length >= 2;
+      const item = document.createElement('div');
+      item.className = 'notification-item';
+      item.innerHTML = `
+        <div class="notification-icon">🚶</div>
+        <div class="notification-body">
+          <div class="notification-title">@${escapeHtml(m.fromUsername)} logged "${escapeHtml(m.entryName || 'a walk')}"</div>
+          <div class="notification-preview">A walk you were part of.</div>
+          <div class="notification-date">${formatDate(m.createdAt)}</div>
+          ${hasRoute ? `<button class="btn btn-sm btn-primary notification-log-btn" style="margin-top:0.5rem">Log my version</button>` : ''}
+        </div>
+      `;
+      if (hasRoute) {
+        item.querySelector('.notification-log-btn').addEventListener('click', () => {
+          closeModal('modal-friends');
+          openJourneyModal({
+            waypoints:      m.waypoints,
+            _sourceEntryId: m.entryId,
+            _fromUsername:  m.fromUsername,
+            _friendToken:   m.fromToken,
+          });
+        });
+      }
+      el.appendChild(item);
+    });
+  }
 }
 
 function renderFriendsList() {
@@ -3556,6 +3620,7 @@ function renderRequestsPanels() {
         await loadFriendEntries();
         await loadMentionEntries();
   await loadMutualWalkEntries();
+  updateFriendsBadge();
         renderFriendsModal();
         renderFeed();
         showToast(`@${req.username} added as a friend ✓`);
@@ -3663,6 +3728,7 @@ async function doFriendSearch() {
           await loadFriendEntries();
           await loadMentionEntries();
   await loadMutualWalkEntries();
+  updateFriendsBadge();
           renderFriendsModal();
           renderFeed();
           showToast(`@${result.username} added — mutual request detected ✓`);
@@ -3714,6 +3780,7 @@ async function init() {
   await loadFriendEntries();
   await loadMentionEntries();
   await loadMutualWalkEntries();
+  updateFriendsBadge();
 
   // Backfill elevation stats for entries that predate the feature — runs silently in background
   backfillElevationStats().catch(() => {});
