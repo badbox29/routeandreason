@@ -331,6 +331,7 @@ async function saveProfileToKV() {
       weightLbs:    state.weightLbs   ?? existing.weightLbs   ?? null,
       pageSize:     state.pageSize    ?? existing.pageSize    ?? 20,
       weatherLocs:  state.weatherLocs?.length ? state.weatherLocs : (existing.weatherLocs ?? []),
+      goals:        (state.goals?.miles || state.goals?.walks) ? state.goals : (existing.goals ?? {}),
       friends,
       incomingReqs,
       outgoingReqs,
@@ -376,6 +377,11 @@ async function loadProfileFromKV() {
     if (Array.isArray(profile.incomingReqs)) state.incomingReqs = profile.incomingReqs;
     if (Array.isArray(profile.outgoingReqs)) state.outgoingReqs = profile.outgoingReqs;
     if (profile.darkMode != null) state.darkMode = profile.darkMode;
+    // Load goals from KV if present and non-empty
+    if (profile.goals?.miles || profile.goals?.walks) {
+      state.goals = profile.goals;
+      saveGoals(); // persist to localStorage
+    }
     // Sync merged state to localStorage as cache
     saveSettings();
   } catch(e) {
@@ -2465,6 +2471,7 @@ document.getElementById('btn-save-goals').addEventListener('click', () => {
   const walks = parseInt(document.getElementById('goal-walks').value)   || 0;
   state.goals = { miles: miles || null, walks: walks || null };
   saveGoals();
+  saveProfileToKV().catch(() => {}); // sync to KV so goals persist cross-browser
   document.getElementById('goals-edit').style.display = 'none';
   document.getElementById('btn-edit-goals').textContent = 'Edit';
   renderGoalsWidget();
