@@ -570,6 +570,7 @@ const SURFACE_COLORS = {
   gravel:  '#c8a84b',
   dirt:    '#8b6340',
   unpaved: '#888888',
+  stairs:  '#e8820c',
 };
 
 function closestWaySurface(pt, ways) {
@@ -607,17 +608,43 @@ function drawSurfaceRoute(routePoints, ways) {
   if (ways.length === 0) {
     const poly = L.polyline(routePoints, { color: '#4a7c59', weight: 4, opacity: 0.85 }).addTo(state.map);
     state.polylines.push(poly);
+    renderSurfaceLegend(new Set(['paved']));
     return;
   }
+
+  const surfacesFound = new Set();
+
   for (let i = 0; i < routePoints.length - 1; i++) {
     const pt      = routePoints[i];
     const surface = closestWaySurface({ lat: pt.lat || pt[0], lng: pt.lng || pt[1] }, ways);
     const color   = SURFACE_COLORS[surface] || SURFACE_COLORS.unpaved;
+    surfacesFound.add(surface);
     const seg     = L.polyline([routePoints[i], routePoints[i + 1]], {
       color, weight: 5, opacity: 0.9,
     }).addTo(state.map);
     state.polylines.push(seg);
   }
+
+  renderSurfaceLegend(surfacesFound);
+}
+
+const SURFACE_LABELS = {
+  paved:   'Paved',
+  gravel:  'Gravel',
+  dirt:    'Dirt',
+  unpaved: 'Unpaved',
+  stairs:  'Stairs',
+};
+
+// Ordered list so legend is always consistent
+const SURFACE_ORDER = ['paved', 'gravel', 'dirt', 'unpaved', 'stairs'];
+
+function renderSurfaceLegend(surfacesFound) {
+  const el = document.getElementById('surface-legend');
+  el.innerHTML = SURFACE_ORDER
+    .filter(s => surfacesFound.has(s))
+    .map(s => `<span class="legend-item"><span class="legend-dot" style="background:${SURFACE_COLORS[s]}"></span>${SURFACE_LABELS[s]}</span>`)
+    .join('');
 }
 
 // ─── Mention autocomplete ─────────────────────────────────────────
