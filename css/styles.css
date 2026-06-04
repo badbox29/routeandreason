@@ -1636,6 +1636,46 @@ a:hover { text-decoration: underline; }
   margin-bottom: 0.5rem;
 }
 
+/* ── Notification items in Social modal ──────────────────────────── */
+.notification-item {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border-soft);
+  align-items: flex-start;
+}
+
+.notification-item:first-of-type { border-top: none; }
+
+.notification-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.notification-body { min-width: 0; flex: 1; }
+
+.notification-title {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin-bottom: 0.2rem;
+}
+
+.notification-preview {
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notification-date {
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  margin-top: 0.2rem;
+}
+
 .request-item {
   display: flex;
   align-items: center;
