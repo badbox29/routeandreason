@@ -12,7 +12,6 @@
  * Routes:
  *   POST   /elevation               — Proxy to Google Elevation API
  *   POST   /osrm                    — Proxy to OSRM match API (snap-to-road, no key needed)
- *   GET    /pollen?lat=&lng=        — Google Pollen API proxy with daily KV cache
  *   GET    /storage/:token/:key     — Read a value from KV for a user token
  *   PUT    /storage/:token/:key     — Write a value to KV for a user token
  *   DELETE /storage/:token/:key     — Delete a value from KV for a user token
@@ -74,10 +73,6 @@ export default {
     try {
       if (pathname === "/elevation" && request.method === "POST") {
         return await handleElevation(request, env);
-      }
-
-      if (pathname === "/pollen" && request.method === "GET") {
-        return await handlePollen(request, env, url);
       }
 
       if (pathname === "/osrm" && request.method === "POST") {
@@ -203,63 +198,6 @@ async function handleElevation(request, env) {
 const OSRM_BASE = "https://router.project-osrm.org";
 const OSRM_MAX_COORDS = 100;
 const OSRM_RADIUS = 10; // metres — OSRM's max allowed per point
-
-// ---------------------------------------------------------------------------
-// Pollen (Google Pollen API — daily KV cache)
-// ---------------------------------------------------------------------------
-
-async function handlePollen(request, env, url) {
-  if (!env.GOOGLE_API_KEY) return errorResponse(500, "API key not configured");
-  if (!env.WALK_JOURNAL_KV)  return errorResponse(500, "KV namespace not configured");
-
-  const lat = parseFloat(url.searchParams.get("lat"));
-  const lng = parseFloat(url.searchParams.get("lng"));
-  if (isNaN(lat) || isNaN(lng)) return errorResponse(400, "lat and lng are required");
-
-  // Cache key: pollen:{lat2dp}:{lng2dp}:{YYYY-MM-DD}
-  const today   = new Date().toISOString().slice(0, 10);
-  const cacheKey = `pollen:${lat.toFixed(2)}:${lng.toFixed(2)}:${today}`;
-
-  // Check KV cache first
-  const cached = await env.WALK_JOURNAL_KV.get(cacheKey, { type: "text" });
-  if (cached) {
-    return jsonResponse(JSON.parse(cached), request);
-  }
-
-  // Fetch from Google Pollen API
-  const googleUrl = `https://pollen.googleapis.com/v1/forecast:lookup`
-    + `?location.longitude=${lng}&location.latitude=${lat}&days=1&key=${env.GOOGLE_API_KEY}`;
-
-  const res  = await fetch(googleUrl);
-  if (!res.ok) {
-    const err = await res.text();
-    console.error("Google Pollen API error:", err);
-    return errorResponse(502, "Pollen API request failed");
-  }
-
-  const data = await res.json();
-
-  // Extract today's pollen data — normalize to { tree, grass, weed } with index + category
-  const day     = data.dailyInfo?.[0];
-  const pollenTypes = {};
-  if (day?.pollenTypeInfo) {
-    for (const pt of day.pollenTypeInfo) {
-      const name = pt.code?.toLowerCase(); // TREE, GRASS, WEED → tree, grass, weed
-      if (!name) continue;
-      pollenTypes[name] = {
-        index:    pt.indexInfo?.value ?? null,
-        category: pt.indexInfo?.category ?? null,
-      };
-    }
-  }
-
-  const result = { tree: pollenTypes.tree || null, grass: pollenTypes.grass || null, weed: pollenTypes.weed || null, date: today };
-
-  // Cache for 24 hours
-  await env.WALK_JOURNAL_KV.put(cacheKey, JSON.stringify(result), { expirationTtl: 60 * 60 * 24 });
-
-  return jsonResponse(result, request);
-}
 
 async function handleOsrm(request, env) {
   const body = await readBody(request);
@@ -486,7 +424,7 @@ async function handleNotify(request, env, pathname) {
   const body = await readBody(request);
   if (!body) return errorResponse(400, "Invalid or oversized request body");
 
-  const { entryId, fromUsername, fromToken, preview } = body;
+  const { entryId, fromUsername, fromToken, preview, type, waypoints, entryName } = body;
   if (!entryId || !fromUsername || !fromToken) {
     return errorResponse(400, "entryId, fromUsername, and fromToken are required");
   }
@@ -498,18 +436,31 @@ async function handleNotify(request, env, pathname) {
     return errorResponse(403, "fromToken does not match fromUsername");
   }
 
-  // Write mention notification to target user's KV space
-  const kvKey = `user:${targetToken}:mention/${entryId}`;
+  const isMutualWalk = type === 'mutualwalk';
+
+  // Mutual walk: 7-day TTL, stored under mutualwalk/ prefix with waypoints
+  // Mention: full-year TTL, stored under mention/ prefix
+  const kvKey = isMutualWalk
+    ? `user:${targetToken}:mutualwalk/${entryId}`
+    : `user:${targetToken}:mention/${entryId}`;
+
   const notification = {
     entryId,
     fromUsername,
     fromToken,
-    preview: (preview || "").slice(0, 200),
+    preview:   (preview || "").slice(0, 200),
     createdAt: new Date().toISOString(),
+    ...(isMutualWalk && {
+      type:      'mutualwalk',
+      entryName: (entryName || "").slice(0, 100),
+      waypoints: (waypoints || []).slice(0, 500),
+    }),
   };
 
+  const ttl = isMutualWalk ? 60 * 60 * 24 * 7 : KV_TTL; // 7 days vs 1 year
+
   await env.WALK_JOURNAL_KV.put(kvKey, JSON.stringify(notification), {
-    expirationTtl: KV_TTL,
+    expirationTtl: ttl,
   });
 
   return jsonResponse({ ok: true }, request);
