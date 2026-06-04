@@ -274,40 +274,60 @@ async function handleSurface(request, env, url) {
     return errorResponse(400, "Invalid bbox format");
   }
 
-  const query = `[out:json][timeout:10];way["surface"](${minLat},${minLng},${maxLat},${maxLng});out geom;`;
+  const query = `[out:json][timeout:15];way["surface"](${minLat},${minLng},${maxLat},${maxLng});out geom;`;
 
-  let res;
-  try {
-    res = await fetch("https://overpass-api.de/api/interpreter", {
-      method:  "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body:    `data=${encodeURIComponent(query)}`,
-    });
-  } catch(e) {
-    return errorResponse(502, `Overpass request failed: ${e.message}`);
+  // Try primary Overpass endpoint, fall back to secondary
+  const endpoints = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+  ];
+
+  let lastError = null;
+  for (const endpoint of endpoints) {
+    try {
+      const res = await fetch(endpoint, {
+        method:  "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent":   "RouteAndReason/1.0",
+        },
+        body: `data=${encodeURIComponent(query)}`,
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error(`Overpass ${endpoint} returned ${res.status}:`, errText.slice(0, 200));
+        lastError = `${res.status}: ${errText.slice(0, 100)}`;
+        continue; // try next endpoint
+      }
+
+      const data = await res.json();
+
+      const SURFACE_MAP = {
+        asphalt: 'paved', concrete: 'paved', paving_stones: 'paved', sett: 'paved',
+        paved: 'paved', cobblestone: 'paved', metal: 'paved',
+        gravel: 'gravel', fine_gravel: 'gravel', compacted: 'gravel', pebblestone: 'gravel',
+        dirt: 'dirt', earth: 'dirt', mud: 'dirt', grass: 'dirt', ground: 'dirt',
+        unpaved: 'unpaved', sand: 'unpaved', woodchips: 'unpaved',
+      };
+
+      const ways = (data.elements || [])
+        .filter(e => e.type === 'way' && e.geometry && e.tags?.surface)
+        .map(e => ({
+          surface:    SURFACE_MAP[e.tags.surface] || 'unpaved',
+          rawSurface: e.tags.surface,
+          geometry:   e.geometry.map(n => ({ lat: n.lat, lng: n.lon })),
+        }));
+
+      return jsonResponse({ ways }, request);
+
+    } catch(e) {
+      console.error(`Overpass ${endpoint} exception:`, e.message);
+      lastError = e.message;
+    }
   }
 
-  if (!res.ok) return errorResponse(502, "Overpass API error");
-
-  const data = await res.json();
-
-  const SURFACE_MAP = {
-    asphalt: 'paved', concrete: 'paved', paving_stones: 'paved', sett: 'paved',
-    paved: 'paved', cobblestone: 'paved', metal: 'paved',
-    gravel: 'gravel', fine_gravel: 'gravel', compacted: 'gravel', pebblestone: 'gravel',
-    dirt: 'dirt', earth: 'dirt', mud: 'dirt', grass: 'dirt', ground: 'dirt',
-    unpaved: 'unpaved', sand: 'unpaved', woodchips: 'unpaved',
-  };
-
-  const ways = (data.elements || [])
-    .filter(e => e.type === 'way' && e.geometry && e.tags?.surface)
-    .map(e => ({
-      surface:    SURFACE_MAP[e.tags.surface] || 'unpaved',
-      rawSurface: e.tags.surface,
-      geometry:   e.geometry.map(n => ({ lat: n.lat, lng: n.lon })),
-    }));
-
-  return jsonResponse({ ways }, request);
+  return errorResponse(502, `Overpass API unavailable: ${lastError}`);
 }
 
 async function handleOsrm(request, env) {
