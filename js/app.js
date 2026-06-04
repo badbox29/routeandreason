@@ -1065,7 +1065,42 @@ function addWaypoint(latlng) {
   if (!state.suppressRouteUpdate) updateRoute();
 }
 
-// Loop detection — show "Close Loop" button if start and end are within 50m
+// One-time backfill: compute elevation stats for existing entries that lack them
+async function backfillElevationStats() {
+  if (!state.workerUrl) return;
+
+  const needsBackfill = state.entries.filter(e =>
+    e.type === 'journey' &&
+    e.waypoints && e.waypoints.length >= 2 &&
+    e.elevGainM == null
+  );
+
+  if (needsBackfill.length === 0) return;
+
+  console.log(`[Elevation backfill] Backfilling ${needsBackfill.length} entries…`);
+
+  for (const entry of needsBackfill) {
+    try {
+      const sample = samplePoints(entry.waypoints, 100);
+      const elevations = await workerFetch('/elevation', 'POST', { locations: sample });
+      const stats = computeElevStats(elevations);
+      if (stats) {
+        entry.elevGainM = stats.elevGainM;
+        entry.elevLossM = stats.elevLossM;
+        entry.elevHighM = stats.elevHighM;
+        entry.elevLowM  = stats.elevLowM;
+        await saveEntry(entry);
+      }
+      // Small delay between calls to avoid hammering the API
+      await new Promise(r => setTimeout(r, 300));
+    } catch(e) {
+      console.warn(`[Elevation backfill] Failed for entry ${entry.id}:`, e.message);
+    }
+  }
+
+  console.log('[Elevation backfill] Complete.');
+  renderElevationRecords();
+}
 function checkLoopDetection() {
   const btn = document.getElementById('btn-close-loop');
   if (state.waypoints.length < 3) { btn.style.display = 'none'; return; }
@@ -3663,6 +3698,9 @@ async function init() {
   await loadFriendEntries();
   await loadMentionEntries();
   await loadMutualWalkEntries();
+
+  // Backfill elevation stats for entries that predate the feature — runs silently in background
+  backfillElevationStats().catch(() => {});
 
   renderFeed();
   renderSpotlight();
