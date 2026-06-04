@@ -573,6 +573,19 @@ const SURFACE_COLORS = {
   stairs:  '#e8820c',
 };
 
+const SURFACE_LABELS = {
+  paved:   'Paved',
+  gravel:  'Gravel',
+  dirt:    'Dirt',
+  unpaved: 'Unpaved',
+  stairs:  'Stairs',
+};
+
+const SURFACE_ORDER = ['paved', 'gravel', 'dirt', 'unpaved', 'stairs'];
+
+// Cache last surface fetch — avoids re-hitting Overpass when toggling back to surface
+const surfaceCache = { bbox: null, ways: null };
+
 function closestWaySurface(pt, ways) {
   let best = null, bestDist = Infinity;
   for (const way of ways) {
@@ -586,25 +599,36 @@ function closestWaySurface(pt, ways) {
 
 async function fetchAndDrawSurface(routePoints) {
   if (!state.workerUrl || routePoints.length < 2) return;
-  const lats = routePoints.map(p => p.lat || p[0]);
-  const lngs = routePoints.map(p => p.lng || p[1]);
-  const bbox = `${Math.min(...lats) - 0.001},${Math.min(...lngs) - 0.001},${Math.max(...lats) + 0.001},${Math.max(...lngs) + 0.001}`;
+  const lats   = routePoints.map(p => p.lat || p[0]);
+  const lngs   = routePoints.map(p => p.lng || p[1]);
+  const minLat = (Math.min(...lats) - 0.001).toFixed(5);
+  const minLng = (Math.min(...lngs) - 0.001).toFixed(5);
+  const maxLat = (Math.max(...lats) + 0.001).toFixed(5);
+  const maxLng = (Math.max(...lngs) + 0.001).toFixed(5);
+  const bbox   = `${minLat},${minLng},${maxLat},${maxLng}`;
+
+  // Use cached result if bbox matches — instant on toggle back
+  if (surfaceCache.bbox === bbox && surfaceCache.ways !== null) {
+    drawSurfaceRoute(routePoints, surfaceCache.ways);
+    return;
+  }
+
   try {
     const url  = state.workerUrl.replace(/\/$/, '') + `/surface?bbox=${encodeURIComponent(bbox)}`;
     const res  = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    drawSurfaceRoute(routePoints, data.ways || []);
+    surfaceCache.bbox = bbox;
+    surfaceCache.ways = data.ways || [];
+    drawSurfaceRoute(routePoints, surfaceCache.ways);
   } catch(e) {
     console.warn('Surface fetch failed, drawing plain route:', e.message);
-    // Fallback — draw plain green line so map isn't blank
     const poly = L.polyline(routePoints, { color: '#4a7c59', weight: 4, opacity: 0.85 }).addTo(state.map);
     state.polylines.push(poly);
   }
 }
 
 function drawSurfaceRoute(routePoints, ways) {
-  // Note: clearMapDrawings() was already called by updateRoute before this
   if (ways.length === 0) {
     const poly = L.polyline(routePoints, { color: '#4a7c59', weight: 4, opacity: 0.85 }).addTo(state.map);
     state.polylines.push(poly);
@@ -612,32 +636,33 @@ function drawSurfaceRoute(routePoints, ways) {
     return;
   }
 
-  const surfacesFound = new Set();
+  const surfacesFound  = new Set();
+  let currentSurface   = null;
+  let currentSegment   = [];
+
+  const flushSegment = () => {
+    if (currentSegment.length >= 2) {
+      const color = SURFACE_COLORS[currentSurface] || SURFACE_COLORS.unpaved;
+      state.polylines.push(L.polyline(currentSegment, { color, weight: 5, opacity: 0.9 }).addTo(state.map));
+    }
+    currentSegment = [];
+  };
 
   for (let i = 0; i < routePoints.length - 1; i++) {
     const pt      = routePoints[i];
     const surface = closestWaySurface({ lat: pt.lat || pt[0], lng: pt.lng || pt[1] }, ways);
-    const color   = SURFACE_COLORS[surface] || SURFACE_COLORS.unpaved;
     surfacesFound.add(surface);
-    const seg     = L.polyline([routePoints[i], routePoints[i + 1]], {
-      color, weight: 5, opacity: 0.9,
-    }).addTo(state.map);
-    state.polylines.push(seg);
+    if (surface !== currentSurface) {
+      flushSegment();
+      currentSurface  = surface;
+      currentSegment  = [routePoints[i]];
+    }
+    currentSegment.push(routePoints[i + 1]);
   }
+  flushSegment();
 
   renderSurfaceLegend(surfacesFound);
 }
-
-const SURFACE_LABELS = {
-  paved:   'Paved',
-  gravel:  'Gravel',
-  dirt:    'Dirt',
-  unpaved: 'Unpaved',
-  stairs:  'Stairs',
-};
-
-// Ordered list so legend is always consistent
-const SURFACE_ORDER = ['paved', 'gravel', 'dirt', 'unpaved', 'stairs'];
 
 function renderSurfaceLegend(surfacesFound) {
   const el = document.getElementById('surface-legend');
