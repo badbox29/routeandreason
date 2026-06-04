@@ -595,12 +595,15 @@ async function fetchAndDrawSurface(routePoints) {
     const data = await res.json();
     drawSurfaceRoute(routePoints, data.ways || []);
   } catch(e) {
-    console.warn('Surface fetch failed:', e.message);
+    console.warn('Surface fetch failed, drawing plain route:', e.message);
+    // Fallback — draw plain green line so map isn't blank
+    const poly = L.polyline(routePoints, { color: '#4a7c59', weight: 4, opacity: 0.85 }).addTo(state.map);
+    state.polylines.push(poly);
   }
 }
 
 function drawSurfaceRoute(routePoints, ways) {
-  clearMapDrawings();
+  // Note: clearMapDrawings() was already called by updateRoute before this
   if (ways.length === 0) {
     const poly = L.polyline(routePoints, { color: '#4a7c59', weight: 4, opacity: 0.85 }).addTo(state.map);
     state.polylines.push(poly);
@@ -1626,17 +1629,20 @@ document.getElementById('journey-save-route').addEventListener('change', functio
 // Toggle listeners
 ['toggle-snap','toggle-elevation','toggle-slope','toggle-surface'].forEach(id => {
   document.getElementById(id).addEventListener('change', () => {
-    if (state.waypoints.length >= 2) updateRoute();
-    if (id === 'toggle-elevation' && !document.getElementById(id).checked) {
-      document.getElementById('elevation-profile').style.display = 'none';
-    }
-    // Toggle exclusivity: slope ↔ surface
+    // Toggle exclusivity: slope ↔ surface (must run before updateRoute)
     if (id === 'toggle-slope' && document.getElementById('toggle-slope').checked) {
       document.getElementById('toggle-surface').checked = false;
     }
     if (id === 'toggle-surface' && document.getElementById('toggle-surface').checked) {
       document.getElementById('toggle-slope').checked = false;
     }
+
+    if (state.waypoints.length >= 2) updateRoute();
+
+    if (id === 'toggle-elevation' && !document.getElementById(id).checked) {
+      document.getElementById('elevation-profile').style.display = 'none';
+    }
+
     // Legend switching
     const slopeOn   = document.getElementById('toggle-slope').checked;
     const surfaceOn = document.getElementById('toggle-surface').checked;
