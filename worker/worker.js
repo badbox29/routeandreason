@@ -274,7 +274,7 @@ async function handleSurface(request, env, url) {
     return errorResponse(400, "Invalid bbox format");
   }
 
-  const query = `[out:json][timeout:15];(way["surface"](${minLat},${minLng},${maxLat},${maxLng});way["highway"~"^(footway|path|track|bridleway|primary|secondary|tertiary|residential|unclassified|service|motorway|trunk)$"](${minLat},${minLng},${maxLat},${maxLng}););out geom;`;
+  const query = `[out:json][timeout:15];(way["surface"](${minLat},${minLng},${maxLat},${maxLng});way["highway"~"^(footway|path|track|bridleway|primary|secondary|tertiary|residential|unclassified|service|motorway|trunk|living_street|pedestrian|cycleway|steps|corridor)$"](${minLat},${minLng},${maxLat},${maxLng}););out geom;`;
 
   // Try primary Overpass endpoint, fall back to secondary
   const endpoints = [
@@ -301,11 +301,17 @@ async function handleSurface(request, env, url) {
     residential:  'paved',
     unclassified: 'paved',
     service:      'paved',
+    living_street:'paved',
+    pedestrian:   'paved',
+    cycleway:     'paved',
     // Unpaved paths
     footway:      'unpaved',
     path:         'unpaved',
     track:        'dirt',
     bridleway:    'dirt',
+    corridor:     'unpaved',
+    // Special
+    steps:        'stairs',
   };
 
   let lastError = null;
