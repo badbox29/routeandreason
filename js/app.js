@@ -563,6 +563,60 @@ async function sendMutualWalkNotification(targetToken, entry) {
   }
 }
 
+// ─── Surface overlay ──────────────────────────────────────────────
+
+const SURFACE_COLORS = {
+  paved:   '#4a7c59',
+  gravel:  '#c8a84b',
+  dirt:    '#8b6340',
+  unpaved: '#888888',
+};
+
+function closestWaySurface(pt, ways) {
+  let best = null, bestDist = Infinity;
+  for (const way of ways) {
+    for (const node of way.geometry) {
+      const d = Math.hypot(pt.lat - node.lat, pt.lng - node.lng);
+      if (d < bestDist) { bestDist = d; best = way.surface; }
+    }
+  }
+  return best || 'paved';
+}
+
+async function fetchAndDrawSurface(routePoints) {
+  if (!state.workerUrl || routePoints.length < 2) return;
+  const lats = routePoints.map(p => p.lat || p[0]);
+  const lngs = routePoints.map(p => p.lng || p[1]);
+  const bbox = `${Math.min(...lats) - 0.001},${Math.min(...lngs) - 0.001},${Math.max(...lats) + 0.001},${Math.max(...lngs) + 0.001}`;
+  try {
+    const url  = state.workerUrl.replace(/\/$/, '') + `/surface?bbox=${encodeURIComponent(bbox)}`;
+    const res  = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    drawSurfaceRoute(routePoints, data.ways || []);
+  } catch(e) {
+    console.warn('Surface fetch failed:', e.message);
+  }
+}
+
+function drawSurfaceRoute(routePoints, ways) {
+  clearMapDrawings();
+  if (ways.length === 0) {
+    const poly = L.polyline(routePoints, { color: '#4a7c59', weight: 4, opacity: 0.85 }).addTo(state.map);
+    state.polylines.push(poly);
+    return;
+  }
+  for (let i = 0; i < routePoints.length - 1; i++) {
+    const pt      = routePoints[i];
+    const surface = closestWaySurface({ lat: pt.lat || pt[0], lng: pt.lng || pt[1] }, ways);
+    const color   = SURFACE_COLORS[surface] || SURFACE_COLORS.unpaved;
+    const seg     = L.polyline([routePoints[i], routePoints[i + 1]], {
+      color, weight: 5, opacity: 0.9,
+    }).addTo(state.map);
+    state.polylines.push(seg);
+  }
+}
+
 // ─── Mention autocomplete ─────────────────────────────────────────
 
 (function initMentionAutocomplete() {
@@ -1235,8 +1289,9 @@ async function updateRoute() {
     return;
   }
 
-  const snap = document.getElementById('toggle-snap').checked;
-  const slope = document.getElementById('toggle-slope').checked;
+  const snap    = document.getElementById('toggle-snap').checked;
+  const slope   = document.getElementById('toggle-slope').checked;
+  const surface = document.getElementById('toggle-surface').checked;
 
   let routePoints = state.waypoints;
 
@@ -1248,7 +1303,9 @@ async function updateRoute() {
     }
   }
 
-  if (slope && state.workerUrl) {
+  if (surface && state.workerUrl) {
+    await fetchAndDrawSurface(routePoints);
+  } else if (slope && state.workerUrl) {
     await drawSlopedRoute(routePoints);
   } else {
     const poly = L.polyline(routePoints, { color: '#4a7c59', weight: 4, opacity: 0.85 }).addTo(state.map);
@@ -1508,6 +1565,7 @@ function clearRoute() {
   document.getElementById('btn-close-loop').style.display         = 'none';
   document.getElementById('stat-elev-gain-item').style.display    = 'none';
   document.getElementById('stat-elev-high-item').style.display    = 'none';
+  document.getElementById('surface-legend').style.display         = 'none';
   state.elevationData   = [];
   state.lastRoutePoints = null;
 }
@@ -1566,18 +1624,27 @@ document.getElementById('journey-save-route').addEventListener('change', functio
 });
 
 // Toggle listeners
-['toggle-snap','toggle-elevation','toggle-slope'].forEach(id => {
+['toggle-snap','toggle-elevation','toggle-slope','toggle-surface'].forEach(id => {
   document.getElementById(id).addEventListener('change', () => {
     if (state.waypoints.length >= 2) updateRoute();
-    // Hide elevation profile if elevation toggled off
     if (id === 'toggle-elevation' && !document.getElementById(id).checked) {
       document.getElementById('elevation-profile').style.display = 'none';
     }
-    // Hide slope legend if slope toggled off
-    const legendEl = document.getElementById('slope-legend');
-    if (id === 'toggle-slope') {
-      legendEl.style.opacity = document.getElementById('toggle-slope').checked ? '1' : '0.3';
+    // Toggle exclusivity: slope ↔ surface
+    if (id === 'toggle-slope' && document.getElementById('toggle-slope').checked) {
+      document.getElementById('toggle-surface').checked = false;
     }
+    if (id === 'toggle-surface' && document.getElementById('toggle-surface').checked) {
+      document.getElementById('toggle-slope').checked = false;
+    }
+    // Legend switching
+    const slopeOn   = document.getElementById('toggle-slope').checked;
+    const surfaceOn = document.getElementById('toggle-surface').checked;
+    const legendEl  = document.getElementById('slope-legend');
+    const surfLegEl = document.getElementById('surface-legend');
+    legendEl.style.opacity  = slopeOn   ? '1' : '0.3';
+    legendEl.style.display  = surfaceOn ? 'none' : '';
+    surfLegEl.style.display = surfaceOn ? '' : 'none';
   });
 });
 
@@ -1585,7 +1652,7 @@ document.getElementById('journey-save-route').addEventListener('change', functio
 // Called on page load and whenever settings are saved.
 function updateWorkerDependentToggles() {
   const hasWorker = !!state.workerUrl;
-  const workerToggles = ['toggle-snap', 'toggle-elevation', 'toggle-slope'];
+  const workerToggles = ['toggle-snap', 'toggle-elevation', 'toggle-slope', 'toggle-surface'];
 
   workerToggles.forEach(id => {
     const checkbox = document.getElementById(id);
@@ -2474,8 +2541,11 @@ function editEntry(entry) {
           clearMapDrawings();
           const pts = entry.routePoints.map(p => L.latLng(p.lat, p.lng));
           state.lastRoutePoints = pts;
-          const slope = document.getElementById('toggle-slope').checked;
-          if (slope && state.workerUrl && state.elevationData?.length >= 2) {
+          const slope   = document.getElementById('toggle-slope').checked;
+          const surface = document.getElementById('toggle-surface').checked;
+          if (surface && state.workerUrl) {
+            fetchAndDrawSurface(pts);
+          } else if (slope && state.workerUrl && state.elevationData?.length >= 2) {
             drawSlopedRoute(pts);
           } else {
             const poly = L.polyline(pts, { color: '#4a7c59', weight: 4, opacity: 0.85 }).addTo(state.map);
