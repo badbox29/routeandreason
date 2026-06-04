@@ -1177,8 +1177,8 @@ function initMap() {
     zoomControl: true,
   });
 
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     subdomains: 'abcd',
     maxZoom: 19,
   }).addTo(state.map);
@@ -2037,9 +2037,9 @@ function renderDiscoverResults(entries, centerLat, centerLng) {
   setTimeout(() => {
     if (state.discoverMap) { state.discoverMap.remove(); state.discoverMap = null; }
     const dmap = L.map('discover-map', { zoomControl: true, scrollWheelZoom: false });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-      subdomains: 'abcd', maxZoom: 19,
+      maxZoom: 19,
     }).addTo(dmap);
 
     const allPoints = [];
@@ -2400,9 +2400,9 @@ function openViewModal(entry) {
     setTimeout(() => {
       if (state.viewMap) { state.viewMap.remove(); state.viewMap = null; }
       const vmap = L.map('view-map', { zoomControl: true, scrollWheelZoom: false });
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-        subdomains: 'abcd', maxZoom: 19,
+        maxZoom: 19,
       }).addTo(vmap);
       const latlngs = (entry.routePoints || entry.waypoints).map(w => L.latLng(w.lat, w.lng));
       L.polyline(latlngs, { color: '#4a7c59', weight: 4, opacity: 0.85 }).addTo(vmap);
