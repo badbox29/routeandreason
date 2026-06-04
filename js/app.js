@@ -580,7 +580,7 @@ function closestWaySurface(pt, ways) {
       if (d < bestDist) { bestDist = d; best = way.surface; }
     }
   }
-  return best || 'paved';
+  return best || 'unpaved';
 }
 
 async function fetchAndDrawSurface(routePoints) {
