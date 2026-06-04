@@ -298,12 +298,6 @@ async function handleSurface(request, env, url) {
     bridleway: 'dirt',
   };
 
-  // Try primary Overpass endpoint, fall back to secondary
-  const endpoints = [
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-  ];
-
   let lastError = null;
   for (const endpoint of endpoints) {
     try {
