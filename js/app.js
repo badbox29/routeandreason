@@ -1393,9 +1393,11 @@ async function fetchSnappedRoute(waypoints) {
     : waypoints;
 
   // Request each consecutive pair separately so we can sanity-check each segment.
-  // A single bulk request hides which segments are bad; pair-by-pair lets us fall
-  // back to a straight line only for the segments OSRM can't route sensibly.
-  const DETOUR_RATIO = 2.0; // if routed distance > 2× straight-line, use straight line
+  // If OSRM detours via roads rather than following the trail, fall back to a
+  // straight line for just that segment.
+  const DETOUR_RATIO = 1.3;  // routed dist must be ≤ 1.3× straight-line
+  const DETOUR_MAX_M = 200;  // routed dist must not add more than 200m over straight-line
+
   const segmentResults = await Promise.all(
     pts.slice(0, -1).map(async (from, i) => {
       const to = pts[i + 1];
@@ -1404,7 +1406,7 @@ async function fetchSnappedRoute(waypoints) {
         { lat: to.lat,   lng: to.lng   }
       );
 
-      // Very short segments (< 20m) — just use straight line, not worth routing
+      // Very short segments (< 20m) — straight line, not worth routing
       if (straightLine < 20) return [from, to];
 
       try {
@@ -1416,16 +1418,14 @@ async function fetchSnappedRoute(waypoints) {
         });
 
         if (!data.ok || !data.points || data.points.length < 2) {
-          return [from, to]; // OSRM failed — straight line
+          return [from, to];
         }
 
         const routedPoints = data.points.map(p => L.latLng(p.lat, p.lng));
         const routedDist   = totalDistance(routedPoints.map(p => ({ lat: p.lat, lng: p.lng })));
 
-        if (routedDist > straightLine * DETOUR_RATIO) {
-          // Route is implausibly long — OSRM detoured via roads rather than trail.
-          // Fall back to straight line for this segment.
-          console.info(`OSRM detour ratio ${(routedDist/straightLine).toFixed(1)}× for segment ${i} — using straight line`);
+        if (routedDist > straightLine * DETOUR_RATIO || routedDist > straightLine + DETOUR_MAX_M) {
+          console.info(`OSRM detour rejected for segment ${i}: routed=${Math.round(routedDist)}m straight=${Math.round(straightLine)}m — using straight line`);
           state._snapPartialFallback = true;
           return [from, to];
         }
@@ -1441,7 +1441,6 @@ async function fetchSnappedRoute(waypoints) {
   // Merge segments, deduplicating the shared endpoint between consecutive segments
   const merged = [segmentResults[0][0]];
   for (const seg of segmentResults) {
-    // Skip first point of each segment (already added as last point of previous)
     for (let i = 1; i < seg.length; i++) merged.push(seg[i]);
   }
 
