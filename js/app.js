@@ -1392,64 +1392,16 @@ async function fetchSnappedRoute(waypoints) {
         .map(p => L.latLng(p.lat, p.lng))
     : waypoints;
 
-  // Request each consecutive pair separately so we can sanity-check each segment.
-  // If OSRM detours via roads rather than following the trail, fall back to a
-  // straight line for just that segment.
-  const DETOUR_RATIO = 1.3;  // routed dist must be ≤ 1.3× straight-line
-  const DETOUR_MAX_M = 200;  // routed dist must not add more than 200m over straight-line
+  const data = await workerFetch('/osrm', 'POST', {
+    waypoints: pts.map(p => ({ lat: p.lat, lng: p.lng })),
+  });
 
-  const segmentResults = await Promise.all(
-    pts.slice(0, -1).map(async (from, i) => {
-      const to = pts[i + 1];
-      const straightLine = haversineMeters(
-        { lat: from.lat, lng: from.lng },
-        { lat: to.lat,   lng: to.lng   }
-      );
-
-      // Very short segments (< 20m) — straight line, not worth routing
-      if (straightLine < 20) return [from, to];
-
-      try {
-        const data = await workerFetch('/osrm', 'POST', {
-          waypoints: [
-            { lat: from.lat, lng: from.lng },
-            { lat: to.lat,   lng: to.lng   },
-          ],
-        });
-
-        if (!data.ok || !data.points || data.points.length < 2) {
-          return [from, to];
-        }
-
-        const routedPoints = data.points.map(p => L.latLng(p.lat, p.lng));
-        const routedDist   = totalDistance(routedPoints.map(p => ({ lat: p.lat, lng: p.lng })));
-
-        if (routedDist > straightLine * DETOUR_RATIO || routedDist > straightLine + DETOUR_MAX_M) {
-          console.info(`OSRM detour rejected for segment ${i}: routed=${Math.round(routedDist)}m straight=${Math.round(straightLine)}m — using straight line`);
-          state._snapPartialFallback = true;
-          return [from, to];
-        }
-
-        return routedPoints;
-      } catch(e) {
-        console.warn('OSRM segment failed:', e.message);
-        return [from, to];
-      }
-    })
-  );
-
-  // Merge segments, deduplicating the shared endpoint between consecutive segments
-  const merged = [segmentResults[0][0]];
-  for (const seg of segmentResults) {
-    for (let i = 1; i < seg.length; i++) merged.push(seg[i]);
+  if (!data.ok || !data.points || data.points.length < 2) {
+    console.warn('OSRM match failed:', data.code, data.message);
+    return waypoints; // fall back to straight lines
   }
 
-  if (state._snapPartialFallback) {
-    showToast('Some segments used straight lines — trails may not be in routing data', 4000);
-    state._snapPartialFallback = false;
-  }
-
-  return merged;
+  return data.points.map(p => L.latLng(p.lat, p.lng));
 }
 
 async function drawSlopedRoute(routePoints) {
