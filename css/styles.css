@@ -1241,6 +1241,28 @@ a:hover { text-decoration: underline; }
 
 .settings-section:last-of-type { border-bottom: none; }
 
+.sync-controls-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: .5rem;
+  margin-top: .5rem;
+}
+.sync-indicator-pill {
+  font-size: .78rem;
+  padding: .2rem .65rem;
+  border-radius: 99px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.sync-controls-btns {
+  display: flex;
+  gap: .5rem;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .settings-heading {
   font-family: var(--font-display);
   font-size: 0.95rem;
