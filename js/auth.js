@@ -54,7 +54,7 @@
  *        mergeData:      (raw) => myApp.mergeData(raw),    // merge raw KV data with defaults
  *        onSignedIn:     (data, isNew) => myApp.onSignedIn(data, isNew),
  *        onGuestReady:   (data) => myApp.render(data),
- *        onSessionExpired: () => Auth.showAccountSetup(),
+ *        onSessionExpired: () => {},  // optional — module calls showGoogleReauth() automatically
  *        pushToWorker:   () => myApp.pushToWorker(),
  *        startSyncPing:  () => myApp.startSyncPing(),
  *        openModal:      (id) => myApp.openModal(id),
@@ -384,17 +384,32 @@ const Auth = (() => {
   }
 
   // ── verifyGoogleSession() ────────────────────────────────────────
-  // Called at boot for Google accounts. Re-verifies the stored ID token
-  // against the worker. If valid, refreshes profile data (name/picture
-  // may have changed). Returns true if valid, false if expired/invalid.
+  // Called at boot for Google accounts. First checks the stored JWT's
+  // exp claim locally — no network needed if the token has >5 minutes
+  // remaining. Only hits the worker when the token is near/past expiry.
+  // Returns true if session is usable, false if re-auth is required.
   // HOST APP INTERFACE: calls getData(), setData(), workerBase()
   async function verifyGoogleSession() {
     if(!isGoogleAccount()) return false;
-    const base    = workerBase();
     const idToken = store.get(C.storageAuthKey);
-    if(!base || !idToken) return false;
+    if(!idToken) return false;
 
+    // Decode JWT payload locally to check exp — no signature verification,
+    // just reading the expiry claim to avoid unnecessary network calls.
     try {
+      const parts   = idToken.split('.');
+      if(parts.length !== 3) return false;
+      const payload = JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/')));
+      const now     = Math.floor(Date.now() / 1000);
+      const exp     = payload.exp || 0;
+
+      // Token still has more than 5 minutes — accept without a network call
+      if(exp - now > 5 * 60) return true;
+
+      // Token is expired or nearly expired — re-verify via worker
+      const base = workerBase();
+      if(!base) return false;
+
       const res  = await fetch(`${base}/auth/verify`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -402,7 +417,6 @@ const Auth = (() => {
       });
       const data = await res.json();
       if(res.ok && data.ok) {
-        // Refresh profile in case name or picture changed
         if(data.profile) {
           const d = getData();
           d.linkedGoogle = data.profile;
@@ -442,22 +456,75 @@ const Auth = (() => {
     const d = getData();
 
     // 1. Google session check
-    if(isGoogleAccount() && workerBase()) {
+    if(isGoogleAccount()) {
       const valid = await verifyGoogleSession();
       if(!valid) {
-        C.onSessionExpired();
+        // Show targeted re-auth screen — skips full wizard, no worker URL needed
+        setTimeout(() => showGoogleReauth(), 800);
         return false;
       }
     }
 
     // 2. Legacy token upgrade prompt
-    // Only show if: token is still legacy after pull (auto-migration didn't
-    // fire via X-Token-Migrated), and user hasn't already dismissed.
     if(isLegacyToken(d.userToken) && !store.get(C.storageDismissKey)) {
       setTimeout(showTokenUpgradePrompt, 800);
     }
 
     return true;
+  }
+
+  // ── showGoogleReauth() ───────────────────────────────────────────
+  // Shown when a returning Google user's ID token has expired at boot.
+  // Skips the full wizard — no worker URL field, no account choice.
+  // Shows the user's name/picture from stored profile for recognition,
+  // then presents just the Google button to re-authenticate.
+  // On success, resumes the app normally without disrupting data.
+  // HOST APP INTERFACE: calls getData(), startSyncPing(), closeModal()
+  function showGoogleReauth() {
+    const d       = getData();
+    const name    = d.linkedGoogle?.name    || d.userName || '';
+    const email   = d.linkedGoogle?.email   || '';
+    const picture = d.linkedGoogle?.picture || '';
+
+    setupScreen('Welcome Back', `
+      <p class="f13 lh muted" style="margin-bottom:1.25rem;">
+        Your session has expired. Sign in again to continue.
+      </p>
+      ${picture || name ? `
+        <div class="auth-google-info" style="margin-bottom:1.25rem;">
+          ${picture ? `<img src="${_esc(picture)}" class="auth-google-avatar" alt="">` : ''}
+          <div>
+            ${name  ? `<div style="font-size:.85rem;font-weight:500;">${_esc(name)}</div>`  : ''}
+            ${email ? `<div style="font-size:.78rem;opacity:.6;">${_esc(email)}</div>` : ''}
+          </div>
+        </div>` : ''}
+      <div id="auth-reauth-container" style="width:100%;min-height:44px;"></div>
+      <div id="auth-reauth-status"
+           style="min-height:1.3rem;font-size:.82rem;margin-top:.5rem;color:var(--red,#c07070);">
+      </div>
+      <div class="row gap-8 mt-8" style="justify-content:flex-start;">
+        <button class="btn btn-ghost btn-sm" id="auth-btn-reauth-different">
+          Use a different account
+        </button>
+      </div>
+    `);
+
+    document.getElementById('auth-btn-reauth-different').addEventListener('click', () => {
+      C.closeModal('modal-account-setup');
+      showAccountSetup();
+    });
+
+    const container = document.getElementById('auth-reauth-container');
+    const statusEl  = document.getElementById('auth-reauth-status');
+
+    signInWithGoogle(container).then(result => {
+      if(result?.ok) {
+        C.closeModal('modal-account-setup');
+        C.startSyncPing();
+      } else {
+        statusEl.textContent = 'Sign-in cancelled — try again or use a different account.';
+      }
+    });
   }
 
   // ── handlePullMigration() ────────────────────────────────────────
@@ -1303,6 +1370,7 @@ const Auth = (() => {
     showAccountSetup,       // S1 welcome screen
     showSetupFresh,         // S2B start fresh (also guest → account conversion)
     showGoogleUpgradeFlow,  // token → Google upgrade (call from Settings)
+    showGoogleReauth,       // re-auth after session expiry (called automatically by bootCheck)
     showGuestSwitchConfirm, // guest switch/reset (call from Settings)
     showTokenUpgradePrompt, // legacy token upgrade prompt (call from boot)
 
@@ -1321,9 +1389,6 @@ const Auth = (() => {
     // Token utilities — host app may need these
     generateToken,          // 128-bit base64url token
     isLegacyToken,          // detect old Math.random() tokens
-
-    // Internal — exposed for host app workerFetch HMAC signing
-    _authHeaders,           // (method, token, body) → auth headers object
   };
 
 })();
