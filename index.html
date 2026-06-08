@@ -19,6 +19,10 @@
   <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
 
   <link rel="stylesheet" href="css/styles.css" />
+
+  <!-- Google Identity Services (GIS) — required for Google sign-in -->
+  <script src="https://accounts.google.com/gsi/client" async
+          onload="window.gisReady=true;window.dispatchEvent(new Event('gis-ready'))"></script>
 </head>
 <body>
 
@@ -513,35 +517,62 @@
 
       <div class="modal-body">
 
+        <!-- ── Sync & Account (managed by Auth module) ─────────────── -->
         <section class="settings-section">
-          <h3 class="settings-heading">Sync &amp; Identity</h3>
-          <div class="form-group">
-            <label class="form-label">Your user token</label>
-            <div class="token-row">
-              <input type="text" class="input input-mono" id="settings-token" readonly />
-              <button class="btn btn-sm btn-outline" id="btn-copy-token">Copy</button>
-            </div>
-            <p class="form-hint">Copy this token and enter it on another device to sync your journal across browsers.</p>
+          <div class="settings-heading">
+            Sync &amp; Account
+            <span id="settings-auth-badge" class="auth-badge auth-badge-token">Token</span>
           </div>
-          <div class="form-group">
-            <label class="form-label">Enter a token from another device</label>
-            <div class="token-row">
-              <input type="text" class="input input-mono" id="settings-import-token" placeholder="Paste token here…" />
-              <button class="btn btn-sm btn-primary" id="btn-import-token">Use this token</button>
-            </div>
-            <p class="form-hint form-hint-warn">⚠️ This will replace your current token. Make sure you've copied your existing one first.</p>
-          </div>
-        </section>
 
-        <section class="settings-section">
-          <h3 class="settings-heading">Worker</h3>
-          <div class="form-group">
-            <label class="form-label">Worker URL</label>
-            <input type="url" class="input" id="settings-worker-url" placeholder="https://your-worker.your-subdomain.workers.dev" />
-            <p class="form-hint">The Cloudflare Worker that proxies API calls and stores your data.</p>
+          <!-- Guest mode -->
+          <div id="settings-guest-section" style="display:none;">
+            <p style="font-size:.85rem;opacity:.7;margin-bottom:.85rem;line-height:1.5;">
+              You're exploring as a guest. Your data is saved on this device only.
+              Create an account to sync across devices and keep your journal safe.
+            </p>
+            <button class="btn btn-primary" id="btn-guest-create-account"
+                    style="width:100%;justify-content:center;">
+              Create Account
+            </button>
           </div>
-          <button class="btn btn-sm btn-outline" id="btn-test-worker">Test connection</button>
-          <span class="worker-status" id="worker-status"></span>
+
+          <!-- Token fields -->
+          <div id="settings-token-group">
+            <div class="form-group">
+              <label class="form-label">User Token</label>
+              <input class="input input-mono" id="p-token" />
+              <div class="form-hint">Your unique ID. Use the same token on every device.</div>
+            </div>
+          </div>
+
+          <!-- Google account info card -->
+          <div id="settings-google-info" style="display:none;margin-bottom:.85rem;"></div>
+
+          <!-- Worker URL -->
+          <div id="settings-worker-group" class="form-group">
+            <label class="form-label">Worker URL</label>
+            <input class="input" id="p-worker-url" placeholder="https://your-worker.workers.dev" />
+            <div class="form-hint">Cloudflare Worker URL for cross-device sync.</div>
+          </div>
+
+          <!-- Sync controls -->
+          <div id="settings-sync-controls" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-top:.5rem;">
+            <span id="sync-indicator">Not synced</span>
+            <div style="display:flex;gap:.5rem;">
+              <button class="btn btn-ghost btn-sm" id="btn-switch-account">Switch Account</button>
+              <button class="btn btn-outline btn-sm" id="btn-manual-sync">Sync Now</button>
+            </div>
+          </div>
+
+          <!-- Token → Google upgrade -->
+          <div id="settings-upgrade-google" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--border);">
+            <p style="font-size:.82rem;opacity:.6;margin-bottom:.6rem;">
+              Upgrade to Google sign-in for stronger security. This is a one-way change.
+            </p>
+            <button class="btn btn-ghost btn-sm" id="btn-upgrade-to-google">
+              Upgrade to Google Sign-In →
+            </button>
+          </div>
         </section>
 
         <section class="settings-section">
@@ -916,6 +947,21 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: Account Setup Wizard                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modal-account-setup" role="dialog" aria-modal="true" aria-label="Account Setup">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h2 class="modal-title" id="account-setup-title"></h2>
+      </div>
+      <div class="modal-body" id="account-setup-body">
+        <!-- Injected by Auth module -->
+      </div>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
