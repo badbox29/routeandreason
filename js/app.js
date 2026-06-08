@@ -81,14 +81,18 @@ const state = {
   friendEntries:[],      // entries fetched from friends
   lastSeenFriends: {},   // {token: ISO timestamp} for "New" dot logic
   darkMode:    false,    // day/night toggle preference
+  // Auth
+  authMethod:   null,    // 'guest' | 'token' | 'google'
+  linkedGoogle: null,    // { sub, email, name, picture } for Google accounts
+  createdAt:    null,    // account creation timestamp (ms)
 };
 
 // ─── Utility ──────────────────────────────────────────────────────
 
+// Token generation delegated to Auth module (128-bit base64url, HMAC-compatible).
+// Auth.init() must be called before this is used.
 function generateToken() {
-  const arr = new Uint8Array(24);
-  crypto.getRandomValues(arr);
-  return Array.from(arr, b => b.toString(16).padStart(2,'0')).join('');
+  return Auth.generateToken();
 }
 
 function formatDate(iso) {
@@ -243,7 +247,7 @@ function slopeColor(pct) {
 function loadSettings() {
   const raw_token  = localStorage.getItem('wj_token');
   const raw_worker = localStorage.getItem('wj_worker');
-  state.token      = (raw_token  && raw_token  !== 'null') ? raw_token  : generateToken();
+  state.token      = (raw_token  && raw_token  !== 'null') ? raw_token  : null;
   state.workerUrl  = (raw_worker && raw_worker !== 'null') ? raw_worker : '';
   state.pageSize   = parseInt(localStorage.getItem('wj_page_size') || '20', 10);
   state.weatherLocs = JSON.parse(localStorage.getItem('wj_weather_locs') || '[]');
@@ -255,11 +259,16 @@ function loadSettings() {
   state.username   = (raw_user && raw_user !== 'null') ? raw_user : null;
   state.lastSeenFriends = JSON.parse(localStorage.getItem('wj_last_seen') || '{}');
   state.darkMode   = localStorage.getItem('wj_dark') === 'true';
+  // Auth fields
+  state.authMethod   = localStorage.getItem('wj_auth_method') || null;
+  const rawGoogle    = localStorage.getItem('wj_linked_google');
+  state.linkedGoogle = rawGoogle ? JSON.parse(rawGoogle) : null;
+  state.createdAt    = parseInt(localStorage.getItem('wj_created_at') || '0', 10) || null;
   // Clean up any string "null" values that may have been written previously
   if (raw_token  === 'null') localStorage.removeItem('wj_token');
   if (raw_worker === 'null') localStorage.removeItem('wj_worker');
   if (raw_user   === 'null') localStorage.removeItem('wj_username');
-  localStorage.setItem('wj_token', state.token);
+  if (state.token) localStorage.setItem('wj_token', state.token);
 }
 
 function saveSettings() {
@@ -280,18 +289,34 @@ function saveSettings() {
   else localStorage.removeItem('wj_username');
   localStorage.setItem('wj_last_seen', JSON.stringify(state.lastSeenFriends));
   localStorage.setItem('wj_dark', state.darkMode ? 'true' : 'false');
+  // Auth fields
+  if (state.authMethod)   localStorage.setItem('wj_auth_method',   state.authMethod);
+  else                    localStorage.removeItem('wj_auth_method');
+  if (state.linkedGoogle) localStorage.setItem('wj_linked_google', JSON.stringify(state.linkedGoogle));
+  else                    localStorage.removeItem('wj_linked_google');
+  if (state.createdAt)    localStorage.setItem('wj_created_at',    String(state.createdAt));
+  else                    localStorage.removeItem('wj_created_at');
 }
 
 // ─── Worker API ───────────────────────────────────────────────────
 
 async function workerFetch(path, method = 'GET', body = null) {
   if (!state.workerUrl) throw new Error('Worker URL not configured');
-  const url = state.workerUrl.replace(/\/$/, '') + path;
+  if (Auth.isGuest()) throw new Error('Guest accounts cannot sync');
+  const url     = state.workerUrl.replace(/\/$/, '') + path;
+  const bodyStr = body !== null ? JSON.stringify(body) : null;
+
+  // Build auth headers — HMAC for token accounts, Bearer for Google
+  let authHeaders = {};
+  try {
+    authHeaders = await Auth._authHeaders(method, state.token, bodyStr);
+  } catch(e) { /* fall through — worker will reject with 401 if required */ }
+
   const opts = {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
   };
-  if (body !== null) opts.body = JSON.stringify(body);
+  if (bodyStr !== null) opts.body = bodyStr;
   const res = await fetch(url, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -318,7 +343,7 @@ async function kvList() {
 // Roaming profile: synced to KV so all browsers get the same settings.
 
 async function saveProfileToKV() {
-  if (!state.workerUrl) return;
+  if (!state.workerUrl || !state.token || Auth.isGuest()) return;
   try {
     // Read existing KV profile first so we don't overwrite fields
     // that exist in KV but are null locally (e.g. on a new browser
@@ -345,6 +370,9 @@ async function saveProfileToKV() {
       incomingReqs,
       outgoingReqs,
       darkMode:     state.darkMode     ?? existing.darkMode     ?? false,
+      authMethod:   state.authMethod   ?? existing.authMethod   ?? null,
+      linkedGoogle: state.linkedGoogle ?? existing.linkedGoogle ?? null,
+      createdAt:    state.createdAt    ?? existing.createdAt    ?? null,
     };
 
     await kvPut('profile', merged);
@@ -357,18 +385,48 @@ async function saveProfileToKV() {
 }
 
 async function loadProfileFromKV() {
-  if (!state.workerUrl) return;
+  if (!state.workerUrl || !state.token || Auth.isGuest()) return;
   try {
-    const profile = await kvGet('profile');
+    // Fetch raw so we can inspect headers (migration)
+    const bodyStr     = null;
+    const authHeaders = await Auth._authHeaders('GET', state.token, bodyStr).catch(() => ({}));
+    const res = await fetch(
+      `${state.workerUrl.replace(/\/$/, '')}/storage/${state.token}/profile`,
+      { headers: { 'Content-Type': 'application/json', ...authHeaders } }
+    );
+
+    // Handle token migration (legacy token upgraded on another device)
+    const migratedTo = res.headers.get('X-Token-Migrated');
+    if (migratedTo) {
+      const data = await res.json().catch(() => ({}));
+      const migrated = Auth.handlePullMigration(migratedTo, { ...data.value, userToken: migratedTo });
+      state.token    = migrated.userToken;
+      state.authMethod = migrated.authMethod || state.authMethod;
+      saveSettings();
+      return;
+    }
+
+    // Handle account migrated to Google (tombstone)
+    if (res.status === 410) {
+      Auth.showAccountSetup();
+      return;
+    }
+
+    if (!res.ok) return;
+
+    const json    = await res.json();
+    const profile = json.value;
     if (!profile) return;
+
     // Only overwrite local state if KV has a non-null value.
-    // This means local data is never clobbered by nulls from KV.
     if (profile.username   != null) state.username   = profile.username;
     if (profile.sex        != null) state.sex        = profile.sex;
     if (profile.ageyears   != null) state.ageyears   = profile.ageyears;
     if (profile.heightIn   != null) state.heightIn   = profile.heightIn;
     if (profile.weightLbs  != null) state.weightLbs  = profile.weightLbs;
     if (profile.pageSize   != null) state.pageSize   = profile.pageSize;
+    if (profile.authMethod != null) state.authMethod = profile.authMethod;
+    if (profile.linkedGoogle != null) state.linkedGoogle = profile.linkedGoogle;
     if (Array.isArray(profile.weatherLocs) && profile.weatherLocs.length > 0) state.weatherLocs = profile.weatherLocs;
 
     // For friends/requests: use KV value if non-empty, else fall back to localStorage backup
@@ -378,7 +436,6 @@ async function loadProfileFromKV() {
       const localFriends = JSON.parse(localStorage.getItem('wj_friends') || '[]');
       if (localFriends.length > 0) {
         state.friends = localFriends;
-        // Restore to KV immediately
         saveProfileToKV().catch(() => {});
       }
     }
@@ -386,16 +443,13 @@ async function loadProfileFromKV() {
     if (Array.isArray(profile.incomingReqs)) state.incomingReqs = profile.incomingReqs;
     if (Array.isArray(profile.outgoingReqs)) state.outgoingReqs = profile.outgoingReqs;
     if (profile.darkMode != null) state.darkMode = profile.darkMode;
-    // Load goals from KV if present and non-empty
     if (profile.goals?.miles || profile.goals?.walks) {
       state.goals = profile.goals;
-      saveGoals(); // persist to localStorage
+      saveGoals();
     }
-    // Sync merged state to localStorage as cache
     saveSettings();
   } catch(e) {
     console.warn('[Profile KV] load failed:', e.message);
-    // If KV is unreachable, try to load friends from localStorage backup
     const localFriends = JSON.parse(localStorage.getItem('wj_friends') || '[]');
     if (localFriends.length > 0) state.friends = localFriends;
   }
@@ -1709,7 +1763,7 @@ document.getElementById('journey-save-route').addEventListener('change', functio
 // Disable/enable toggles that require the worker based on whether a URL is set.
 // Called on page load and whenever settings are saved.
 function updateWorkerDependentToggles() {
-  const hasWorker = !!state.workerUrl;
+  const hasWorker = !!state.workerUrl && !Auth.isGuest();
   const workerToggles = ['toggle-snap', 'toggle-elevation', 'toggle-slope', 'toggle-surface'];
 
   workerToggles.forEach(id => {
@@ -3333,8 +3387,12 @@ function drawDowChart(entries) {
 // ─── Settings Modal ───────────────────────────────────────────────
 
 function populateSettingsModal() {
-  document.getElementById('settings-token').value      = state.token;
-  document.getElementById('settings-worker-url').value = state.workerUrl || '';
+  // Populate the token and worker URL into the new auth module field IDs
+  const tokenEl  = document.getElementById('p-token');
+  const workerEl = document.getElementById('p-worker-url');
+  if (tokenEl)  tokenEl.value  = state.token    || '';
+  if (workerEl) workerEl.value = state.workerUrl || '';
+
   document.getElementById('settings-page-size').value  = String(state.pageSize);
   document.getElementById('settings-weight').value     = state.weightLbs || '';
   document.getElementById('settings-height').value     = state.heightIn  || '';
@@ -3343,6 +3401,9 @@ function populateSettingsModal() {
   document.getElementById('settings-username').value   = state.username  || '';
   document.getElementById('username-status').textContent = '';
   renderSettingsWeatherLocs();
+
+  // Let the auth module update the badge and show/hide sections
+  Auth.renderSettingsSection();
 }
 
 function renderSettingsWeatherLocs() {
@@ -3367,57 +3428,20 @@ function renderSettingsWeatherLocs() {
   });
 }
 
-document.getElementById('btn-copy-token').addEventListener('click', () => {
-  navigator.clipboard.writeText(state.token).then(() => showToast('Token copied ✓'));
-});
-
-document.getElementById('btn-import-token').addEventListener('click', () => {
-  const val = document.getElementById('settings-import-token').value.trim();
-  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(val)) {
-    showToast('Invalid token format'); return;
+// ── Settings modal — auth button event delegation ─────────────────
+// Auth buttons are shown/hidden dynamically, so we use delegation.
+document.getElementById('modal-settings').addEventListener('click', e => {
+  if (e.target.closest('#btn-guest-create-account')) {
+    setTimeout(() => { closeModal('modal-settings'); Auth.showSetupFresh(); }, 0);
   }
-  if (!confirm('Replace your current token? Make sure you have copied it first.')) return;
-  state.token = val;
-  saveSettings();
-  document.getElementById('settings-token').value = val;
-  document.getElementById('settings-import-token').value = '';
-  showToast('Token updated. Reloading data…');
-  loadProfileFromKV().then(() => {
-    saveSettings(); // persist downloaded profile to localStorage cache
-    loadEntries().then(async () => {
-      await loadFriendEntries();
-      await loadMentionEntries();
-  await loadMutualWalkEntries();
-  updateFriendsBadge();
-      renderFeed();
-      renderSpotlight();
-      renderSavedRoutes();
-  renderElevationRecords();
-  renderGoalsWidget();
-      renderWeatherSidebar();
-      updateFriendsBadge();
-    });
-  });
-});
-
-document.getElementById('btn-test-worker').addEventListener('click', async () => {
-  const url = document.getElementById('settings-worker-url').value.trim();
-  const statusEl = document.getElementById('worker-status');
-  if (!url) { statusEl.textContent = 'Enter a URL first'; statusEl.className = 'worker-status err'; return; }
-  statusEl.textContent = 'Testing…';
-  statusEl.className = 'worker-status';
-  try {
-    const res = await fetch(url.replace(/\/$/, '') + '/ping');
-    const data = await res.json();
-    if (data.ok) {
-      statusEl.textContent = '✓ Connected';
-      statusEl.className = 'worker-status ok';
-    } else {
-      throw new Error('Unexpected response');
-    }
-  } catch(e) {
-    statusEl.textContent = '✗ Failed: ' + e.message;
-    statusEl.className = 'worker-status err';
+  if (e.target.closest('#btn-upgrade-to-google')) {
+    setTimeout(() => { closeModal('modal-settings'); Auth.showGoogleUpgradeFlow(); }, 0);
+  }
+  if (e.target.closest('#btn-switch-account')) {
+    setTimeout(() => { closeModal('modal-settings'); Auth.showGuestSwitchConfirm(); }, 0);
+  }
+  if (e.target.closest('#btn-manual-sync')) {
+    saveProfileToKV().then(() => showToast('Synced ✓')).catch(() => showToast('Sync failed'));
   }
 });
 
@@ -3447,7 +3471,14 @@ document.getElementById('btn-save-location').addEventListener('click', async () 
 
 document.getElementById('btn-save-settings').addEventListener('click', async () => {
   const prevWorkerUrl = state.workerUrl;
-  const newWorkerUrl  = document.getElementById('settings-worker-url').value.trim();
+  // Read from auth module field IDs (p-token, p-worker-url)
+  const newToken      = (document.getElementById('p-token')?.value || '').trim();
+  const newWorkerUrl  = (document.getElementById('p-worker-url')?.value || '').trim();
+
+  // Only apply token change for token accounts (Google accounts use google:<sub>)
+  if (newToken && Auth.isTokenAccount() && newToken !== state.token) {
+    state.token = newToken;
+  }
   state.workerUrl  = newWorkerUrl;
   state.pageSize   = parseInt(document.getElementById('settings-page-size').value, 10);
   state.weightLbs  = parseFloat(document.getElementById('settings-weight').value || '0') || null;
@@ -3456,43 +3487,38 @@ document.getElementById('btn-save-settings').addEventListener('click', async () 
   state.sex        = document.getElementById('settings-sex').value || null;
   // Note: username is saved separately via btn-save-username
   saveSettings();
-  saveProfileToKV();
+  if (!Auth.isGuest()) saveProfileToKV();
   closeModal('modal-settings');
   showToast('Settings saved ✓');
   renderWeatherSidebar();
   updateWorkerDependentToggles();
 
-  // If a new (or changed) worker URL was entered, silently test it and
-  // prompt to migrate any unsynced local entries.
+  // If worker URL changed, pull fresh data
   const workerChanged = newWorkerUrl && newWorkerUrl !== prevWorkerUrl;
-  if (workerChanged) {
+  if (workerChanged && !Auth.isGuest()) {
     try {
-      const res  = await fetch(newWorkerUrl.replace(/\/$/, '') + '/ping');
+      const res  = await fetch(newWorkerUrl.replace(/\/$/, '') + '/');
       const data = await res.json();
       if (!data.ok) throw new Error('ping failed');
 
-      // Worker is reachable — pull profile then reload entries
       await loadProfileFromKV();
-      // Re-save to localStorage now that profile is populated from KV
       saveSettings();
       await loadEntries();
       await loadFriendEntries();
       await loadMentionEntries();
-  await loadMutualWalkEntries();
-  updateFriendsBadge();
+      await loadMutualWalkEntries();
+      updateFriendsBadge();
       renderFeed();
       renderSpotlight();
       renderSavedRoutes();
-  renderElevationRecords();
-  renderGoalsWidget();
+      renderElevationRecords();
+      renderGoalsWidget();
       renderWeatherSidebar();
       updateWorkerDependentToggles();
       updateFriendsBadge();
 
       const { count, entries: unsynced } = await countUnsyncedLocalEntries();
-      if (count > 0) {
-        promptSyncModal(count, unsynced);
-      }
+      if (count > 0) promptSyncModal(count, unsynced);
     } catch(e) {
       showToast('⚠️ Worker saved but could not be reached — check the URL');
     }
@@ -3977,13 +4003,103 @@ async function init() {
   loadSyncQueue();
   applyDarkMode();  // apply before any KV fetch to avoid flash
 
-  if (state.workerUrl) {
-    // Pull profile from KV — merges roaming settings into local state.
-    // We do NOT push back on init — that would overwrite KV with whatever
-    // happens to be in localStorage at load time, which may be incomplete.
-    // Profile is only pushed when the user explicitly saves settings or username.
+  // ── Auth module initialisation ────────────────────────────────────
+  // Must happen before any worker calls so callbacks and state are ready.
+  Auth.init({
+    googleClientId:    '816310286560-8q21cppmirq6n5r3c3cmsolaaakga4s1.apps.googleusercontent.com',
+    storageKey:        'wj_appdata',
+    storageAuthKey:    'wj_google_id_token',
+    storageDismissKey: 'wj_token_upgrade_dismissed',
+    workerBase:        () => state.workerUrl || '',
+    getData:           () => ({
+      userToken:    state.token,
+      workerUrl:    state.workerUrl,
+      authMethod:   state.authMethod,
+      linkedGoogle: state.linkedGoogle,
+      createdAt:    state.createdAt,
+    }),
+    setData: (d) => {
+      if (d.userToken    !== undefined) state.token        = d.userToken;
+      if (d.workerUrl    !== undefined) state.workerUrl    = d.workerUrl;
+      if (d.authMethod   !== undefined) state.authMethod   = d.authMethod;
+      if (d.linkedGoogle !== undefined) state.linkedGoogle = d.linkedGoogle;
+      if (d.createdAt    !== undefined) state.createdAt    = d.createdAt;
+      saveSettings();
+    },
+    mergeData: (raw) => ({
+      userToken:    raw.userToken    ?? state.token,
+      workerUrl:    raw.workerUrl    ?? state.workerUrl ?? '',
+      authMethod:   raw.authMethod   ?? 'token',
+      linkedGoogle: raw.linkedGoogle ?? null,
+      createdAt:    raw.createdAt    ?? Date.now(),
+    }),
+    onSignedIn: async (data, isNewAccount) => {
+      if (data.userToken    !== undefined) state.token        = data.userToken;
+      if (data.workerUrl    !== undefined) state.workerUrl    = data.workerUrl;
+      if (data.authMethod   !== undefined) state.authMethod   = data.authMethod;
+      if (data.linkedGoogle !== undefined) state.linkedGoogle = data.linkedGoogle;
+      if (data.createdAt    !== undefined) state.createdAt    = data.createdAt;
+      saveSettings();
+      if (!isNewAccount) {
+        await loadProfileFromKV();
+        applyDarkMode();
+      }
+      await loadEntries();
+      await loadFriendEntries();
+      await loadMentionEntries();
+      await loadMutualWalkEntries();
+      updateFriendsBadge();
+      renderFeed();
+      renderSpotlight();
+      renderSavedRoutes();
+      renderElevationRecords();
+      renderGoalsWidget();
+      renderWeatherSidebar();
+      updateWorkerDependentToggles();
+      showToast(`Welcome to Route & Reason 🌿`);
+    },
+    onGuestReady: async (data) => {
+      if (data.authMethod !== undefined) state.authMethod = data.authMethod;
+      saveSettings();
+      renderFeed();
+      renderSpotlight();
+      renderGoalsWidget();
+      updateWorkerDependentToggles();
+    },
+    onSessionExpired: () => {
+      showToast('Your session has expired — please sign in again.');
+      Auth.showAccountSetup();
+    },
+    pushToWorker:  () => saveProfileToKV(),
+    startSyncPing: () => {},  // sync ping is handled by the setInterval below
+    openModal,
+    closeModal,
+    toast:    (msg) => showToast(msg),
+    appName:  'Route & Reason',
+    appEmoji: '🌿',
+  });
+
+  // ── First run: no token means brand new device / new user ─────────
+  const isFirstRun = !state.token && !state.authMethod;
+  if (isFirstRun) {
+    // Load local-only entries first so guest users see any cached data
+    state.entries     = JSON.parse(localStorage.getItem('wj_entries') || '[]');
+    state.savedRoutes = JSON.parse(localStorage.getItem('wj_routes')  || '[]');
+    renderFeed();
+    renderGoalsWidget();
+    updateWorkerDependentToggles();
+    Auth.showAccountSetup();
+    return;
+  }
+
+  // ── Existing session ──────────────────────────────────────────────
+  if (state.workerUrl && !Auth.isGuest()) {
     await loadProfileFromKV();
-    applyDarkMode();  // re-apply in case KV had a different preference
+    applyDarkMode();
+
+    // bootCheck handles Google session verify + legacy token upgrade prompt
+    const shouldContinue = await Auth.bootCheck(state.token);
+    if (!shouldContinue) return;
   }
 
   await loadEntries();
@@ -3992,7 +4108,7 @@ async function init() {
   await loadMutualWalkEntries();
   updateFriendsBadge();
 
-  // Backfill elevation stats for entries that predate the feature — runs silently in background
+  // Backfill elevation stats for entries that predate the feature
   backfillElevationStats().catch(() => {});
 
   renderFeed();
@@ -4011,7 +4127,6 @@ async function init() {
   window.addEventListener('online', () => drainSyncQueue());
   setInterval(drainSyncQueue, 30000);
 
-  // Attempt initial drain in case items were queued in a previous session
   drainSyncQueue();
 }
 
