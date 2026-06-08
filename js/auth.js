@@ -1389,6 +1389,7 @@ const Auth = (() => {
     // Token utilities — host app may need these
     generateToken,          // 128-bit base64url token
     isLegacyToken,          // detect old Math.random() tokens
+    _authHeaders,           // build auth headers for worker requests (HMAC or Bearer)
   };
 
 })();

@@ -4098,8 +4098,7 @@ async function init() {
       updateWorkerDependentToggles();
     },
     onSessionExpired: () => {
-      showToast('Your session has expired — please sign in again.');
-      Auth.showAccountSetup();
+      // No-op — Auth.bootCheck() now calls showGoogleReauth() automatically
     },
     pushToWorker:  () => saveProfileToKV(),
     startSyncPing: () => {},  // sync ping is handled by the setInterval below
