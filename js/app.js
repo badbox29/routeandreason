@@ -264,6 +264,12 @@ function loadSettings() {
   const rawGoogle    = localStorage.getItem('wj_linked_google');
   state.linkedGoogle = rawGoogle ? JSON.parse(rawGoogle) : null;
   state.createdAt    = parseInt(localStorage.getItem('wj_created_at') || '0', 10) || null;
+  // Legacy migration: existing users have a token but no authMethod stored yet.
+  // Infer 'token' so they don't land in guest mode.
+  if (!state.authMethod && state.token) {
+    state.authMethod = 'token';
+    localStorage.setItem('wj_auth_method', 'token');
+  }
   // Clean up any string "null" values that may have been written previously
   if (raw_token  === 'null') localStorage.removeItem('wj_token');
   if (raw_worker === 'null') localStorage.removeItem('wj_worker');
