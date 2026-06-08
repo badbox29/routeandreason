@@ -3413,13 +3413,13 @@ function populateSettingsModal() {
   if (syncIndicator) {
     if (Auth.isGuest()) {
       syncIndicator.textContent = '';
-      syncIndicator.style.cssText = '';
+      syncIndicator.style.cssText = 'flex-shrink:0;';
     } else if (state.workerUrl) {
       syncIndicator.textContent = '✓ Synced';
-      syncIndicator.style.cssText = 'font-size:.78rem;padding:.2rem .65rem;border-radius:99px;border:1px solid rgba(74,124,89,.4);background:rgba(74,124,89,.12);color:var(--green-mid);';
+      syncIndicator.style.cssText = 'flex-shrink:0;font-size:.78rem;padding:.2rem .65rem;border-radius:99px;border:1px solid rgba(74,124,89,.4);background:rgba(74,124,89,.12);color:var(--green-mid);';
     } else {
       syncIndicator.textContent = 'No worker URL';
-      syncIndicator.style.cssText = 'font-size:.78rem;padding:.2rem .65rem;border-radius:99px;border:1px solid var(--border);color:var(--ink-muted);';
+      syncIndicator.style.cssText = 'flex-shrink:0;font-size:.78rem;padding:.2rem .65rem;border-radius:99px;border:1px solid var(--border);color:var(--ink-muted);';
     }
   }
 
@@ -3463,14 +3463,14 @@ document.getElementById('modal-settings').addEventListener('click', e => {
   }
   if (e.target.closest('#btn-manual-sync')) {
     const indicator = document.getElementById('sync-indicator');
-    if (indicator) { indicator.textContent = 'Syncing…'; indicator.style.cssText = 'font-size:.78rem;padding:.2rem .65rem;border-radius:99px;border:1px solid var(--border);color:var(--ink-muted);'; }
+    if (indicator) { indicator.textContent = 'Syncing…'; indicator.style.cssText = 'flex-shrink:0;font-size:.78rem;padding:.2rem .65rem;border-radius:99px;border:1px solid var(--border);color:var(--ink-muted);'; }
     saveProfileToKV()
       .then(() => {
-        if (indicator) { indicator.textContent = '✓ Synced'; indicator.style.cssText = 'font-size:.78rem;padding:.2rem .65rem;border-radius:99px;border:1px solid rgba(74,124,89,.4);background:rgba(74,124,89,.12);color:var(--green-mid);'; }
+        if (indicator) { indicator.textContent = '✓ Synced'; indicator.style.cssText = 'flex-shrink:0;font-size:.78rem;padding:.2rem .65rem;border-radius:99px;border:1px solid rgba(74,124,89,.4);background:rgba(74,124,89,.12);color:var(--green-mid);'; }
         showToast('Synced ✓');
       })
       .catch(() => {
-        if (indicator) { indicator.textContent = 'Sync failed'; indicator.style.cssText = 'font-size:.78rem;padding:.2rem .65rem;border-radius:99px;border:1px solid rgba(192,57,43,.4);background:rgba(192,57,43,.08);color:var(--red-soft);'; }
+        if (indicator) { indicator.textContent = 'Sync failed'; indicator.style.cssText = 'flex-shrink:0;font-size:.78rem;padding:.2rem .65rem;border-radius:99px;border:1px solid rgba(192,57,43,.4);background:rgba(192,57,43,.08);color:var(--red-soft);'; }
         showToast('Sync failed');
       });
   }
