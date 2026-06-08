@@ -278,10 +278,10 @@ const Auth = (() => {
     // Step 2: try to load existing account from Google KV key
     let remote = null;
     try {
-      const res = await fetch(`${base}/kv/${encodeURIComponent(kvKey)}`, {
+      const res = await fetch(`${base}/storage/${encodeURIComponent(kvKey)}/profile`, {
         headers: { 'Authorization': `Bearer ${idToken}` },
       });
-      if(res.ok) remote = await res.json();
+      if(res.ok) { const j = await res.json(); remote = j.value ?? j; }
     } catch { /* new account — remote stays null */ }
 
     const isNewAccount = !remote;
@@ -545,7 +545,7 @@ const Auth = (() => {
     // Best-effort push back under the new token
     const base = (data.workerUrl || getData()?.workerUrl || '').replace(/\/+$/, '');
     if(base) {
-      fetch(`${base}/kv/${encodeURIComponent(newToken)}`, {
+      fetch(`${base}/storage/${encodeURIComponent(newToken)}/profile`, {
         method:  'PUT',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(data),
@@ -874,10 +874,10 @@ const Auth = (() => {
       try {
         const base    = workerUrl.replace(/\/+$/,'');
         const hmacHdrs = await _signRequest('GET', token, '').catch(() => ({}));
-        const res = await fetch(`${base}/kv/${encodeURIComponent(token)}`, {
+        const res = await fetch(`${base}/storage/${encodeURIComponent(token)}/profile`, {
           headers: hmacHdrs,
         });
-        if(res.ok) remote = await res.json();
+        if(res.ok) { const j = await res.json(); remote = j.value ?? j; }
       } catch {}
 
       if(!remote) {
@@ -1286,7 +1286,7 @@ const Auth = (() => {
 
         let ok = false;
         try {
-          const res = await fetch(`${base}/kv/${encodeURIComponent(newToken)}`, {
+          const res = await fetch(`${base}/storage/${encodeURIComponent(newToken)}/profile`, {
             method:  'PUT',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify(payload),
