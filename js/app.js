@@ -3408,6 +3408,20 @@ function populateSettingsModal() {
   document.getElementById('username-status').textContent = '';
   renderSettingsWeatherLocs();
 
+  // Update sync indicator
+  const syncIndicator = document.getElementById('sync-indicator');
+  if (syncIndicator) {
+    if (Auth.isGuest()) {
+      syncIndicator.textContent = '';
+    } else if (state.workerUrl) {
+      syncIndicator.textContent = 'Synced ✓';
+      syncIndicator.style.color = 'var(--green-mid)';
+    } else {
+      syncIndicator.textContent = 'No worker URL set';
+      syncIndicator.style.color = 'var(--ink-muted)';
+    }
+  }
+
   // Let the auth module update the badge and show/hide sections
   Auth.renderSettingsSection();
 }
@@ -3447,7 +3461,17 @@ document.getElementById('modal-settings').addEventListener('click', e => {
     setTimeout(() => { closeModal('modal-settings'); Auth.showGuestSwitchConfirm(); }, 0);
   }
   if (e.target.closest('#btn-manual-sync')) {
-    saveProfileToKV().then(() => showToast('Synced ✓')).catch(() => showToast('Sync failed'));
+    const indicator = document.getElementById('sync-indicator');
+    if (indicator) { indicator.textContent = 'Syncing…'; indicator.style.color = 'var(--ink-muted)'; }
+    saveProfileToKV()
+      .then(() => {
+        if (indicator) { indicator.textContent = 'Synced ✓'; indicator.style.color = 'var(--green-mid)'; }
+        showToast('Synced ✓');
+      })
+      .catch(() => {
+        if (indicator) { indicator.textContent = 'Sync failed'; indicator.style.color = 'var(--red-soft)'; }
+        showToast('Sync failed');
+      });
   }
 });
 
