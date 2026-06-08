@@ -2087,3 +2087,77 @@ body.dark .site-header .btn-ghost:hover {
   color: #fff;
   background: rgba(255,255,255,0.1);
 }
+
+/* ═════════════════════════════════════════════════════════════════
+   Auth Module Styles
+   ═════════════════════════════════════════════════════════════════ */
+
+/* ── modal-sm — used by the account setup wizard ──────────────── */
+.modal-sm { max-width: 420px; }
+
+/* ── Auth utility classes (used by auth.js injected HTML) ─────── */
+.f13  { font-size: .82rem; }
+.lh   { line-height: 1.55; }
+.muted { color: var(--ink-muted); }
+.w100 { width: 100%; }
+
+/* .row — horizontal flex row, used in wizard layout */
+.row  { display: flex; align-items: center; }
+.gap-8 { gap: .5rem; }
+
+/* ── Auth method badge ─────────────────────────────────────────── */
+.auth-badge {
+  display: inline-block;
+  font-size: .68rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: .18rem .55rem;
+  border-radius: 99px;
+  margin-left: .6rem;
+  vertical-align: middle;
+  border: 1px solid transparent;
+}
+.auth-badge-token  { color: #b8985a; border-color: rgba(184,152,90,.35);  background: rgba(184,152,90,.1);  }
+.auth-badge-google { color: #7ab4f5; border-color: rgba(122,180,245,.35); background: rgba(122,180,245,.08); }
+.auth-badge-guest  { color: #888;    border-color: rgba(128,128,128,.3);  background: rgba(128,128,128,.08); }
+
+/* ── "or" divider ─────────────────────────────────────────────── */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  color: #666;
+  font-size: .75rem;
+  margin: .1rem 0;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: .3;
+}
+
+/* ── Google account info card (shown in Settings) ─────────────── */
+.auth-google-info {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .65rem .8rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+.auth-google-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+/* ── Dark mode overrides ──────────────────────────────────────── */
+body.dark .auth-badge-token  { color: #d4b06e; border-color: rgba(212,176,110,.35); background: rgba(212,176,110,.12); }
+body.dark .auth-badge-google { color: #7ab4f5; border-color: rgba(122,180,245,.3);  background: rgba(122,180,245,.1);  }
+body.dark .auth-badge-guest  { color: #aaa;    border-color: rgba(170,170,170,.3);  background: rgba(170,170,170,.08); }
+body.dark .auth-google-info  { border-color: rgba(255,255,255,.12); }
