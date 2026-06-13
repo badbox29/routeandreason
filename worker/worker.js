@@ -3,6 +3,7 @@
  *
  * Environment variables (set in Cloudflare dashboard):
  *   GOOGLE_API_KEY     — Google Maps Platform key (Elevation + Pollen APIs)
+ *   GOOGLE_CLIENT_ID   — Google OAuth Client ID (for Google sign-in)
  *   ALLOWED_ORIGINS    — Comma-separated list of allowed origins, e.g.:
  *                        https://yourusername.github.io,http://localhost:3000
  *
@@ -36,7 +37,8 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-const GOOGLE_CLIENT_ID = '816310286560-8q21cppmirq6n5r3c3cmsolaaakga4s1.apps.googleusercontent.com';
+// GOOGLE_CLIENT_ID is read from env.GOOGLE_CLIENT_ID (set in Cloudflare dashboard).
+// Do NOT hardcode it here.
 
 const KV_BINDING = 'WALK_JOURNAL_KV';
 
@@ -155,14 +157,14 @@ async function verifyHmacSignature(request, token, body) {
 
 // Unified KV credential check.
 // Google keys → Bearer JWT; token keys → HMAC (if hmacRequired).
-async function checkKvAuth(request, token, cors, hmacRequired, body) {
+async function checkKvAuth(request, token, cors, hmacRequired, body, env) {
   const isGoogle = token.startsWith('google:');
 
   if (isGoogle) {
     const authHeader = request.headers.get('Authorization') || '';
     const idToken    = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
     if (!idToken) return { ok: false, response: respond(JSON.stringify({ error: 'Authorization required' }), 401, cors) };
-    const payload = await verifyGoogleJWT(idToken);
+    const payload = await verifyGoogleJWT(idToken, env?.GOOGLE_CLIENT_ID);
     if (!payload) return { ok: false, response: respond(JSON.stringify({ error: 'Invalid or expired Google token' }), 401, cors) };
     if (token !== `google:${payload.sub}`) return { ok: false, response: respond(JSON.stringify({ error: 'Token mismatch' }), 403, cors) };
     return { ok: true, isGoogle: true };
@@ -177,8 +179,8 @@ async function checkKvAuth(request, token, cors, hmacRequired, body) {
 
 // ── Google JWT verification ──────────────────────────────────────
 
-async function verifyGoogleJWT(idToken) {
-  if (!GOOGLE_CLIENT_ID) return null;
+async function verifyGoogleJWT(idToken, clientId) {
+  if (!clientId) return null;
   try {
     const parts = idToken.split('.');
     if (parts.length !== 3) return null;
@@ -188,7 +190,7 @@ async function verifyGoogleJWT(idToken) {
 
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp < now)                                                      return null;
-    if (payload.aud !== GOOGLE_CLIENT_ID)                                       return null;
+    if (payload.aud !== clientId)                                               return null;
     if (!['accounts.google.com', 'https://accounts.google.com'].includes(payload.iss)) return null;
     if (!payload.sub)                                                            return null;
 
@@ -237,7 +239,7 @@ async function handleAuthRoutes(url, method, request, env, cors) {
       return respond(JSON.stringify({ error: 'Invalid request body' }), 400, cors);
     }
     if (!idToken) return respond(JSON.stringify({ error: 'idToken required' }), 400, cors);
-    const payload = await verifyGoogleJWT(idToken);
+    const payload = await verifyGoogleJWT(idToken, env.GOOGLE_CLIENT_ID);
     if (!payload) return respond(JSON.stringify({ error: 'Invalid or expired Google token' }), 401, cors);
     const kvKey = `google:${payload.sub}`;
     return respond(JSON.stringify({ ok: true, kvKey, profile: payload }), 200, cors);
@@ -251,7 +253,7 @@ async function handleAuthRoutes(url, method, request, env, cors) {
       return respond(JSON.stringify({ error: 'Invalid request body' }), 400, cors);
     }
     if (!idToken) return respond(JSON.stringify({ error: 'idToken required' }), 400, cors);
-    const payload = await verifyGoogleJWT(idToken);
+    const payload = await verifyGoogleJWT(idToken, env.GOOGLE_CLIENT_ID);
     if (!payload) return respond(JSON.stringify({ ok: false, error: 'Token expired or invalid' }), 401, cors);
     return respond(JSON.stringify({ ok: true, profile: payload }), 200, cors);
   }
@@ -267,7 +269,7 @@ async function handleAuthRoutes(url, method, request, env, cors) {
     if (!idToken || !oldToken) return respond(JSON.stringify({ error: 'idToken and oldToken required' }), 400, cors);
     if (!isValidToken(oldToken)) return respond(JSON.stringify({ error: 'Invalid token format' }), 400, cors);
 
-    const payload = await verifyGoogleJWT(idToken);
+    const payload = await verifyGoogleJWT(idToken, env.GOOGLE_CLIENT_ID);
     if (!payload) return respond(JSON.stringify({ error: 'Invalid or expired Google token' }), 401, cors);
 
     if (migrationCode) {
@@ -355,7 +357,11 @@ export default {
     if (method === 'GET' && (url.pathname === '/' || url.pathname === '/ping')) {
       return new Response(JSON.stringify({ ok: true, ts: Date.now() }), {
         status: 200,
-        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*',
+        },
       });
     }
 
@@ -638,7 +644,7 @@ async function handleStorage(request, env, pathname, cors) {
 
   if (request.method === 'GET') {
     // Auth check
-    const auth = await checkKvAuth(request, token, cors, true, null);
+    const auth = await checkKvAuth(request, token, cors, true, null, env);
     if (!auth.ok) return auth.response;
 
     // Migration tombstone check (token→Google migration)
@@ -665,7 +671,7 @@ async function handleStorage(request, env, pathname, cors) {
     }
 
     // Auth check (HMAC over the raw body text)
-    const auth = await checkKvAuth(request, token, cors, true, bodyText);
+    const auth = await checkKvAuth(request, token, cors, true, bodyText, env);
     if (!auth.ok) return auth.response;
 
     // Write legacy forwarding pointer if _legacyToken present
