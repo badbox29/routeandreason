@@ -295,6 +295,24 @@ async function handleAuthRoutes(url, method, request, env, cors) {
     await kv.put(`migrated:${oldToken}`, kvKey, { expirationTtl: 60 * 60 * 24 * 90 });
     if (migrationCode) await kv.delete(`migcode:${oldToken}`);
 
+    // Copy all entry/ and route/ keys from old token namespace to new Google key namespace
+    const oldPrefix = `user:${oldToken}:`;
+    const newPrefix = `user:${kvKey}:`;
+    let cursor = undefined;
+    do {
+      const listed = await kv.list({ prefix: oldPrefix, cursor });
+      for (const k of listed.keys) {
+        const subKey = k.name.slice(oldPrefix.length); // e.g. "entry/abc123"
+        if (subKey.startsWith('entry/') || subKey.startsWith('route/')) {
+          const val = await kv.get(k.name, { type: 'text' });
+          if (val !== null) {
+            await kv.put(newPrefix + subKey, val, { expirationTtl: KV_TTL });
+          }
+        }
+      }
+      cursor = listed.list_complete ? undefined : listed.cursor;
+    } while (cursor);
+
     return respond(JSON.stringify({ ok: true, kvKey, profile: payload }), 200, cors);
   }
 
