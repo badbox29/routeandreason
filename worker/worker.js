@@ -621,7 +621,7 @@ async function handleStorage(request, env, pathname, cors) {
   const parts = pathname.split('/').filter(Boolean); // ["storage", token, ...key parts]
   if (parts.length < 2) return respond(JSON.stringify({ error: 'Token required' }), 400, cors);
 
-  const token = parts[1];
+  const token = decodeURIComponent(parts[1]);
   if (!isValidToken(token)) return respond(JSON.stringify({ error: 'Invalid token format' }), 400, cors);
 
   // Per-token rate limiting (sliding window) for storage routes
