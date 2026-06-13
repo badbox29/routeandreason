@@ -385,8 +385,10 @@ async function saveProfileToKV() {
 
     // Also back up friends to localStorage so a KV blip can't wipe them
     if (friends.length) localStorage.setItem('wj_friends', JSON.stringify(friends));
+    return true;
   } catch(e) {
     console.warn('Profile KV save failed:', e.message);
+    return false;
   }
 }
 
