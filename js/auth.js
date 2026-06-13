@@ -1146,6 +1146,7 @@ const Auth = (() => {
 
         C.closeModal('modal-account-setup');
         C.toast('Account upgraded to Google sign-in ✓');
+        C.onSignedIn(d, false); // false = existing account — triggers loadEntries/render
       } catch(err) {
         statusEl.style.color = 'var(--red, #c07070)';
         statusEl.textContent = `Migration failed: ${err.message}`;
