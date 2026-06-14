@@ -248,7 +248,8 @@ function loadSettings() {
   const raw_token  = localStorage.getItem('wj_token');
   const raw_worker = localStorage.getItem('wj_worker');
   state.token      = (raw_token  && raw_token  !== 'null') ? raw_token  : null;
-  state.workerUrl  = (raw_worker && raw_worker !== 'null') ? raw_worker : '';
+  const DEFAULT_WORKER = 'https://routeandreason.fttmastomod.workers.dev';
+  state.workerUrl  = (raw_worker && raw_worker !== 'null') ? raw_worker : DEFAULT_WORKER;
   state.pageSize   = parseInt(localStorage.getItem('wj_page_size') || '20', 10);
   state.weatherLocs = JSON.parse(localStorage.getItem('wj_weather_locs') || '[]');
   state.weightLbs  = parseFloat(localStorage.getItem('wj_weight')  || '0') || null;
@@ -385,10 +386,8 @@ async function saveProfileToKV() {
 
     // Also back up friends to localStorage so a KV blip can't wipe them
     if (friends.length) localStorage.setItem('wj_friends', JSON.stringify(friends));
-    return true;
   } catch(e) {
     console.warn('Profile KV save failed:', e.message);
-    return false;
   }
 }
 
@@ -3461,7 +3460,23 @@ document.getElementById('modal-settings').addEventListener('click', e => {
     setTimeout(() => { closeModal('modal-settings'); Auth.showGoogleUpgradeFlow(); }, 0);
   }
   if (e.target.closest('#btn-switch-account')) {
-    setTimeout(() => { closeModal('modal-settings'); Auth.showGuestSwitchConfirm(); }, 0);
+    setTimeout(() => {
+      closeModal('modal-settings');
+      if (state.authMethod === 'google' || state.authMethod === 'token') {
+        // Synced account — data is safe in KV, no warning needed
+        const key    = 'wj_appdata';
+        const sep    = key.lastIndexOf('_');
+        const prefix = sep > 0 ? key.slice(0, sep + 1) : null;
+        if (prefix) {
+          Object.keys(localStorage).filter(k => k.startsWith(prefix)).forEach(k => localStorage.removeItem(k));
+        }
+        localStorage.removeItem('wj_google_id_token');
+        localStorage.removeItem('wj_token_upgrade_dismissed');
+        location.reload();
+      } else {
+        Auth.showGuestSwitchConfirm();
+      }
+    }, 0);
   }
   if (e.target.closest('#btn-manual-sync')) {
     const indicator = document.getElementById('sync-indicator');
