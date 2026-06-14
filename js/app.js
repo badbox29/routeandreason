@@ -3463,7 +3463,10 @@ document.getElementById('modal-settings').addEventListener('click', e => {
     setTimeout(() => {
       closeModal('modal-settings');
       if (state.authMethod === 'google' || state.authMethod === 'token') {
-        // Synced account — data is safe in KV, no warning needed
+        // Clear local session now — data is safe in KV.
+        // Welcome modal opens; sign-out is complete only when they pick a path.
+        // Closing the modal without choosing leaves the page in a signed-out
+        // state until reload (harmless since KV holds all their data).
         const key    = 'wj_appdata';
         const sep    = key.lastIndexOf('_');
         const prefix = sep > 0 ? key.slice(0, sep + 1) : null;
@@ -3472,7 +3475,7 @@ document.getElementById('modal-settings').addEventListener('click', e => {
         }
         localStorage.removeItem('wj_google_id_token');
         localStorage.removeItem('wj_token_upgrade_dismissed');
-        location.reload();
+        Auth.showAccountSetup();
       } else {
         Auth.showGuestSwitchConfirm();
       }
