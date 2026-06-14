@@ -289,6 +289,7 @@ const Auth = (() => {
     if(remote) {
       // Existing Google account — merge with defaults and apply
       const merged = C.mergeData(remote);
+      merged.userToken    = kvKey; // always set — remote profile has no userToken field
       merged.workerUrl    = oldWorkerUrl || merged.workerUrl;
       merged.authMethod   = 'google';
       merged.linkedGoogle = profile;
