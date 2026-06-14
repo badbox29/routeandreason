@@ -279,10 +279,18 @@ async function handleAuthRoutes(url, method, request, env, cors) {
       }
     }
 
+    const kvKey = `google:${payload.sub}`;
+
+    // Guard — if this Google ID already has an account, block the migration.
+    // One Google identity = one account. The user should sign in with Google instead.
+    const existingGoogle = await kv.get(`user:${kvKey}:profile`, { type: 'text' });
+    if (existingGoogle) {
+      return respond(JSON.stringify({ error: 'A Route & Reason account already exists for this Google account. Sign in with Google instead of migrating.' }), 409, cors);
+    }
+
     const existingData = await kv.get(`user:${oldToken}:profile`, { type: 'text' });
     if (!existingData) return respond(JSON.stringify({ error: 'Source account not found' }), 404, cors);
 
-    const kvKey = `google:${payload.sub}`;
     let parsed;
     try { parsed = JSON.parse(existingData); } catch {
       return respond(JSON.stringify({ error: 'Corrupt source data' }), 500, cors);
