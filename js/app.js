@@ -85,6 +85,10 @@ const state = {
   authMethod:   null,    // 'guest' | 'token' | 'google'
   linkedGoogle: null,    // { sub, email, name, picture } for Google accounts
   createdAt:    null,    // account creation timestamp (ms)
+  // Sync integrity
+  lastModified:   0,     // ms timestamp of the last LOCAL profile change
+  profilePushedAt:0,     // ms timestamp of the last profile value pushed to KV
+  authFailed:     false, // true while the session is dead and writes are blocked
 };
 
 // ─── Utility ──────────────────────────────────────────────────────
@@ -265,6 +269,10 @@ function loadSettings() {
   const rawGoogle    = localStorage.getItem('wj_linked_google');
   state.linkedGoogle = rawGoogle ? JSON.parse(rawGoogle) : null;
   state.createdAt    = parseInt(localStorage.getItem('wj_created_at') || '0', 10) || null;
+  // Sync integrity timestamps — used to decide local vs remote authority
+  // at sign-in, and to detect stale writes at the worker.
+  state.lastModified    = parseInt(localStorage.getItem('wj_last_modified')  || '0', 10) || 0;
+  state.profilePushedAt = parseInt(localStorage.getItem('wj_profile_pushed') || '0', 10) || 0;
   // Legacy migration: existing users have a token but no authMethod stored yet.
   // Infer 'token' so they don't land in guest mode.
   if (!state.authMethod && state.token) {
@@ -303,33 +311,148 @@ function saveSettings() {
   else                    localStorage.removeItem('wj_linked_google');
   if (state.createdAt)    localStorage.setItem('wj_created_at',    String(state.createdAt));
   else                    localStorage.removeItem('wj_created_at');
+  localStorage.setItem('wj_last_modified',  String(state.lastModified    || 0));
+  localStorage.setItem('wj_profile_pushed', String(state.profilePushedAt || 0));
+}
+
+// ─── Sync integrity ───────────────────────────────────────────────
+// touchProfile() marks the local profile as changed. Call it from any
+// code path that mutates a field saveProfileToKV() sends. The timestamp
+// is what lets sign-in decide whether local or remote is authoritative,
+// and what lets the worker reject a stale overwrite.
+function touchProfile() {
+  state.lastModified = Date.now();
+  localStorage.setItem('wj_last_modified', String(state.lastModified));
+}
+
+// isSyncDirty() — true when the local profile has changes the server has
+// not acknowledged, or entries are still sitting in the offline queue.
+// While this is true, a remote copy must never be applied over local.
+function isSyncDirty() {
+  return (state.lastModified > state.profilePushedAt) || state.syncQueue.length > 0;
 }
 
 // ─── Worker API ───────────────────────────────────────────────────
 
-async function workerFetch(path, method = 'GET', body = null) {
-  if (!state.workerUrl) throw new Error('Worker URL not configured');
-  if (Auth.isGuest()) throw new Error('Guest accounts cannot sync');
+// SyncError — carries the HTTP status so callers can tell an expired
+// credential (terminal, stop retrying, re-auth) apart from a dropped
+// connection (transient, keep retrying). A plain Error made these
+// indistinguishable, so a dead token was retried forever in silence.
+class SyncError extends Error {
+  constructor(message, status, detail) {
+    super(message);
+    this.name   = 'SyncError';
+    this.status = status;          // HTTP status, or 0 for a network throw
+    this.detail = detail || null;  // parsed error body, when present
+  }
+  get isAuth()     { return this.status === 401 || this.status === 403; }
+  get isConflict() { return this.status === 409; }
+  get isNetwork()  { return this.status === 0; }
+}
+
+async function workerFetch(path, method = 'GET', body = null, _isRetry = false) {
+  if (!state.workerUrl) throw new SyncError('Worker URL not configured', 0);
+  if (Auth.isGuest())   throw new SyncError('Guest accounts cannot sync', 0);
   const url     = state.workerUrl.replace(/\/$/, '') + path;
   const bodyStr = body !== null ? JSON.stringify(body) : null;
 
-  // Build auth headers — HMAC for token accounts, Bearer for Google
-  let authHeaders = {};
-  try {
-    authHeaders = await Auth._authHeaders(method, state.token, bodyStr);
-  } catch(e) { /* fall through — worker will reject with 401 if required */ }
+  // Build auth headers — HMAC for token accounts, Bearer for Google.
+  // Auth._authHeaders now FAILS CLOSED and returns null when it cannot
+  // produce valid credentials. The worker requires auth on every storage
+  // route, so sending the request unsigned would be a guaranteed 401 with
+  // no explanation. Treat it as an auth failure right here instead.
+  const authHeaders = await Auth._authHeaders(method, state.token, bodyStr);
+  if (!authHeaders) {
+    const err = new SyncError('Cannot authenticate — no valid credentials', 401);
+    await handleAuthFailure(err);
+    throw err;
+  }
 
   const opts = {
     method,
     headers: { 'Content-Type': 'application/json', ...authHeaders },
   };
   if (bodyStr !== null) opts.body = bodyStr;
-  const res = await fetch(url, opts);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
+
+  let res;
+  try {
+    res = await fetch(url, opts);
+  } catch(e) {
+    // Genuine network failure — transient, safe to retry later.
+    throw new SyncError(e.message || 'Network unreachable', 0);
   }
+
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    const err    = new SyncError(detail.error || `HTTP ${res.status}`, res.status, detail);
+
+    if (err.isAuth) {
+      // Terminal for this credential. Try once to renew, and if that works,
+      // replay the request exactly once. Never loop.
+      if (!_isRetry) {
+        const renewed = await Auth.refreshGoogleSession().catch(() => false);
+        if (renewed) return workerFetch(path, method, body, true);
+      }
+      await handleAuthFailure(err);
+    }
+    throw err;
+  }
+
+  // A successful authenticated request means the session is alive.
+  if (state.authFailed) clearAuthFailure();
+
   return res.json();
+}
+
+// ─── Auth failure state ───────────────────────────────────────────
+// An expired credential is NOT the same as being offline: retrying it
+// learns nothing and it needs a distinct, non-dismissible signal so the
+// user knows their writes are not landing.
+
+async function handleAuthFailure(err) {
+  if (state.authFailed) return;
+  state.authFailed = true;
+  console.warn('[Sync] authentication failed — writes are not landing:', err?.message);
+  // Mirror the state into Auth. Without this, Auth's internal flag stays
+  // false and notifyAuthRestored() short-circuits on the next successful
+  // sign-in, leaving the banner up forever.
+  try { Auth.notifyAuthFailure(err?.message || 'request-401'); } catch {}
+  renderSyncStatus();
+}
+
+function clearAuthFailure() {
+  if (!state.authFailed) return;
+  state.authFailed = false;
+  renderSyncStatus();
+  // Session is back — flush anything that piled up while we were locked out.
+  drainSyncQueue();
+  saveProfileToKV().catch(() => {});
+}
+
+// renderSyncStatus() — persistent banner shown only while signed out.
+// Deliberately not dismissible: dismissing it would hide the fact that
+// nothing is being saved. Created on demand so no HTML change is needed.
+function renderSyncStatus() {
+  let el = document.getElementById('sync-auth-banner');
+
+  if (!state.authFailed) {
+    if (el) el.remove();
+    return;
+  }
+
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'sync-auth-banner';
+    el.className = 'sync-auth-banner';
+    el.setAttribute('role', 'alert');
+    el.innerHTML = `
+      <span class="sync-auth-banner-text">Signed out &middot; not syncing</span>
+      <button type="button" class="sync-auth-banner-btn" id="sync-auth-resignin">Sign in</button>
+    `;
+    document.body.appendChild(el);
+    document.getElementById('sync-auth-resignin')
+      .addEventListener('click', () => Auth.showGoogleReauth());
+  }
 }
 
 async function kvGet(key) {
@@ -350,7 +473,15 @@ async function kvList() {
 // Roaming profile: synced to KV so all browsers get the same settings.
 
 async function saveProfileToKV() {
-  if (!state.workerUrl || !state.token || Auth.isGuest()) return;
+  // Stamp the local change FIRST, before any early return. Every profile
+  // mutation in the app routes through here, so this is the single place
+  // that keeps lastModified honest. It must happen even when the push is
+  // impossible (guest, offline, dead session) — otherwise a device that
+  // edited offline looks pristine at next sign-in and gets overwritten.
+  touchProfile();
+
+  if (!state.workerUrl || !state.token || Auth.isGuest()) return false;
+  if (state.authFailed) return false; // no point — the credential is dead
   try {
     // Read existing KV profile first so we don't overwrite fields
     // that exist in KV but are null locally (e.g. on a new browser
@@ -380,14 +511,49 @@ async function saveProfileToKV() {
       authMethod:   state.authMethod   ?? existing.authMethod   ?? null,
       linkedGoogle: state.linkedGoogle ?? existing.linkedGoogle ?? null,
       createdAt:    state.createdAt    ?? existing.createdAt    ?? null,
+      // Stamp every write. The worker compares this against the stored copy
+      // and rejects with 409 if we would be overwriting something newer.
+      lastModified: Math.max(state.lastModified || 0, Date.now()),
     };
 
-    await kvPut('profile', merged);
+    try {
+      await kvPut('profile', merged);
+    } catch(e) {
+      if (!(e instanceof SyncError) || !e.isConflict) throw e;
+
+      // 409 — the server holds a newer copy than the one we based this on.
+      // Pull it, merge our local values on top, and retry exactly once.
+      console.warn('[Sync] profile write conflict — pulling and retrying once.',
+                   'storedAt:', e.detail?.storedAt, 'submittedAt:', e.detail?.submittedAt);
+
+      const fresh = await kvGet('profile').catch(() => null);
+      if (!fresh) throw e;
+
+      const reconciled = { ...fresh, ...merged };
+      // Never let the retry lose list data that only the server has.
+      if (!friends.length      && fresh.friends?.length)      reconciled.friends      = fresh.friends;
+      if (!incomingReqs.length && fresh.incomingReqs?.length) reconciled.incomingReqs = fresh.incomingReqs;
+      if (!outgoingReqs.length && fresh.outgoingReqs?.length) reconciled.outgoingReqs = fresh.outgoingReqs;
+      reconciled.lastModified = Date.now();
+
+      await kvPut('profile', reconciled);
+    }
+
+    // Push acknowledged — local is no longer ahead of the server.
+    state.profilePushedAt = merged.lastModified;
+    state.lastModified    = Math.max(state.lastModified || 0, merged.lastModified);
+    localStorage.setItem('wj_profile_pushed', String(state.profilePushedAt));
+    localStorage.setItem('wj_last_modified',  String(state.lastModified));
 
     // Also back up friends to localStorage so a KV blip can't wipe them
     if (friends.length) localStorage.setItem('wj_friends', JSON.stringify(friends));
+    return true;
   } catch(e) {
+    // Auth failures are terminal and already surfaced by workerFetch —
+    // don't bury them in a console.warn alongside transient network noise.
+    if (e instanceof SyncError && e.isAuth) return false;
     console.warn('Profile KV save failed:', e.message);
+    return false;
   }
 }
 
@@ -396,7 +562,13 @@ async function loadProfileFromKV() {
   try {
     // Fetch raw so we can inspect headers (migration)
     const bodyStr     = null;
-    const authHeaders = await Auth._authHeaders('GET', state.token, bodyStr).catch(() => ({}));
+    const authHeaders = await Auth._authHeaders('GET', state.token, bodyStr).catch(() => null);
+    if (!authHeaders) {
+      // Fail closed — an unsigned request is a guaranteed 401 and would
+      // look identical to "no profile in KV", silently dropping the pull.
+      await handleAuthFailure(new SyncError('No valid credentials at boot', 401));
+      return;
+    }
     const res = await fetch(
       `${state.workerUrl.replace(/\/$/, '')}/storage/${state.token}/profile`,
       { headers: { 'Content-Type': 'application/json', ...authHeaders } }
@@ -419,11 +591,27 @@ async function loadProfileFromKV() {
       return;
     }
 
+    if (res.status === 401 || res.status === 403) {
+      // Expired credential — distinct from "nothing stored" and from being
+      // offline. Try one renewal; if it takes, re-run the pull.
+      const renewed = await Auth.refreshGoogleSession().catch(() => false);
+      if (renewed) return loadProfileFromKV();
+      await handleAuthFailure(new SyncError('Session expired', res.status));
+      return;
+    }
+
     if (!res.ok) return;
 
     const json    = await res.json();
     const profile = json.value;
     if (!profile) return;
+
+    // Adopt the server's timestamp so isSyncDirty() compares like with like.
+    // Without this the local profile always looks newer than the remote one.
+    if (profile.lastModified) {
+      state.lastModified    = Math.max(state.lastModified || 0, Number(profile.lastModified) || 0);
+      state.profilePushedAt = Math.max(state.profilePushedAt || 0, Number(profile.lastModified) || 0);
+    }
 
     // Only overwrite local state if KV has a non-null value.
     if (profile.username   != null) state.username   = profile.username;
@@ -1061,6 +1249,9 @@ function isQueued(entryId) {
 
 async function drainSyncQueue() {
   if (!state.workerUrl || state.syncQueue.length === 0) return;
+  // A dead credential will fail every single op. Retrying the whole queue
+  // every 30 seconds against it accomplishes nothing and hides the cause.
+  if (state.authFailed) return;
 
   const queue = [...state.syncQueue]; // snapshot
   let changed  = false;
@@ -1076,7 +1267,10 @@ async function drainSyncQueue() {
       state.syncQueue = state.syncQueue.filter(q => q.id !== op.id);
       changed = true;
     } catch(e) {
-      // Still offline or error — leave in queue
+      // Auth failure applies to every remaining op — stop the pass rather
+      // than grinding through the rest of the queue for the same 401.
+      if (e instanceof SyncError && e.isAuth) break;
+      // Still offline or a transient error — leave in queue and try later.
     }
   }
 
@@ -4122,6 +4316,18 @@ async function init() {
     },
     pushToWorker:  () => saveProfileToKV(),
     startSyncPing: () => {},  // sync ping is handled by the setInterval below
+
+    // Sign-in authority: tells Auth whether this device holds unsynced
+    // changes. When true, a remote copy is never applied over local.
+    getSyncDirty: () => isSyncDirty(),
+
+    // Session lifecycle — drives the persistent "not syncing" banner.
+    onAuthFailure: (reason) => {
+      console.warn('[Auth] session failure:', reason);
+      state.authFailed = true;
+      renderSyncStatus();
+    },
+    onAuthRestored: () => { clearAuthFailure(); },
     openModal,
     closeModal,
     toast:    (msg) => showToast(msg),

@@ -157,16 +157,62 @@ const Auth = (() => {
     return { 'X-Timestamp': timestamp, 'X-Signature': sig };
   }
 
+  // ── JWT helpers ──────────────────────────────────────────────────
+  // Local-only decode of the payload segment. No signature verification —
+  // the worker does that. Used purely to read the exp claim so we can
+  // avoid sending a credential we already know is dead.
+
+  function _decodeJwt(idToken) {
+    try {
+      const parts = String(idToken).split('.');
+      if(parts.length !== 3) return null;
+      return JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/')));
+    } catch { return null; }
+  }
+
+  // _tokenSecondsLeft() — seconds until the stored Google ID token expires.
+  // Returns -1 when there is no token or it cannot be parsed.
+  function _tokenSecondsLeft(idToken) {
+    const payload = _decodeJwt(idToken || store.get(C.storageAuthKey));
+    if(!payload || !payload.exp) return -1;
+    return payload.exp - Math.floor(Date.now() / 1000);
+  }
+
+  // isSessionExpiring(marginSec) — true when the Google session has less
+  // than marginSec remaining (or is already gone). Host app can use this
+  // to decide whether a write is worth attempting.
+  function isSessionExpiring(marginSec = 60) {
+    if(!isGoogleAccount()) return false;
+    return _tokenSecondsLeft() < marginSec;
+  }
+
   // _authHeaders(method, token, body) — returns the correct auth headers
   // for a worker request based on current account type.
   //   Google → Authorization: Bearer <idToken>
   //   Token  → X-Timestamp + X-Signature (HMAC)
+  //
+  // FAILS CLOSED. Returns null when it cannot produce valid credentials:
+  //   - Google account with no stored ID token, or an already-expired one
+  //   - HMAC signing threw (crypto.subtle unavailable — insecure context,
+  //     old WebView). The worker requires HMAC, so an unsigned request is
+  //     a guaranteed 401. Better to surface the failure than to send it.
+  //
+  // Callers MUST check for null and must not fall back to sending the
+  // request with no auth headers.
   async function _authHeaders(method, token, body) {
     if(isGoogleAccount()) {
       const idToken = store.get(C.storageAuthKey);
-      return idToken ? { 'Authorization': `Bearer ${idToken}` } : {};
+      if(!idToken) return null;
+      // Already expired — don't burn a round trip on a certain 401.
+      if(_tokenSecondsLeft(idToken) <= 0) return null;
+      return { 'Authorization': `Bearer ${idToken}` };
     }
-    try { return await _signRequest(method, token, body); } catch { return {}; }
+    try {
+      return await _signRequest(method, token, body);
+    } catch(err) {
+      console.error('[Auth] request signing failed — cannot authenticate:', err);
+      return null;
+    }
   }
 
   // ── Token generation ─────────────────────────────────────────────
@@ -287,13 +333,45 @@ const Auth = (() => {
     const isNewAccount = !remote;
 
     if(remote) {
-      // Existing Google account — merge with defaults and apply
-      const merged = C.mergeData(remote);
-      merged.userToken    = kvKey; // always set — remote profile has no userToken field
-      merged.workerUrl    = oldWorkerUrl || merged.workerUrl;
-      merged.authMethod   = 'google';
-      merged.linkedGoogle = profile;
-      C.onSignedIn(merged, false);
+      // ── Existing Google account ────────────────────────────────────
+      // This function runs for BOTH first sign-in and re-authentication.
+      // On re-auth, the device may hold newer data than the server. Applying
+      // remote unconditionally overwrites local with the stale server copy,
+      // and the subsequent push sends that stale copy back up — destroying
+      // the data on both sides. So compare before applying.
+      const local     = getData() || {};
+      const localTs   = Number(local.lastModified)  || 0;
+      const remoteTs  = Number(remote.lastModified) || 0;
+      const syncDirty = !!(C.getSyncDirty && C.getSyncDirty());
+
+      // Remote wins only when there is nothing unsynced locally AND the
+      // server copy is genuinely newer. Ties go to local — a client with an
+      // equal timestamp has at minimum the same data, and may have more.
+      const remoteWins = !syncDirty && remoteTs > localTs;
+
+      if(remoteWins) {
+        const merged = C.mergeData(remote);
+        merged.userToken    = kvKey; // always set — remote profile has no userToken field
+        merged.workerUrl    = oldWorkerUrl || merged.workerUrl;
+        merged.authMethod   = 'google';
+        merged.linkedGoogle = profile;
+        C.onSignedIn(merged, false);
+      } else {
+        // Keep local data. Adopt only the Google identity fields, then push
+        // local up so the server catches up to this device.
+        const d = getData();
+        d.authMethod   = 'google';
+        d.linkedGoogle = profile;
+        d.userToken    = kvKey;
+        d.workerUrl    = oldWorkerUrl || d.workerUrl;
+        C.setData(d);
+        C.onSignedIn(d, false);
+        // Credential must be stored before the push, or the push has no auth.
+        store.set(C.storageAuthKey, idToken);
+        try { await C.pushToWorker(); } catch(e) {
+          console.warn('[Auth] post-reauth push failed:', e?.message || e);
+        }
+      }
     } else {
       // New Google account — update current data in place
       const d = getData();
@@ -305,8 +383,14 @@ const Auth = (() => {
       C.onSignedIn(d, true);
     }
 
-    // Store ID token for session verification at next boot
+    // Store ID token for session verification at next boot.
+    // (The keep-local branch above already stored it, ahead of its push —
+    // this is idempotent.)
     store.set(C.storageAuthKey, idToken);
+
+    // Arm the renewal timer and clear any "signed out" state in the host UI.
+    scheduleTokenRefresh();
+    notifyAuthRestored();
 
     return { ok: true, isNewAccount, profile };
   }
@@ -382,6 +466,155 @@ const Auth = (() => {
     // User must go through account setup to change auth method.
     C.setData(d);
     C.toast('Signed out. Your data is still stored securely.');
+  }
+
+  // ── Session lifetime management ──────────────────────────────────
+  // Google ID tokens are valid for one hour. Nothing in GIS renews them
+  // automatically, so without this a tab left open past the hour mark
+  // silently 401s on every write. We schedule a refresh ~5 minutes ahead
+  // of expiry and attempt a silent re-issue while the OLD token is still
+  // valid — so any in-flight write still lands.
+
+  let _refreshTimer  = null;
+  let _refreshInFlight = false;
+  let _authFailed    = false;
+
+  const REFRESH_MARGIN_SEC = 5 * 60;   // renew this far ahead of exp
+  const SILENT_TIMEOUT_MS  = 8 * 1000; // give up on One Tap after this
+
+  // notifyAuthFailure(reason) — single funnel for "we are signed out and
+  // not syncing". Idempotent: fires the host hook only on transition.
+  function notifyAuthFailure(reason) {
+    if(_authFailed) return;
+    _authFailed = true;
+    clearTokenRefresh();
+    console.warn('[Auth] session failure:', reason);
+    try { C.onAuthFailure?.(reason); } catch {}
+  }
+
+  // notifyAuthRestored() — inverse of the above, fired after a successful
+  // re-auth so the host can clear its banner and retry queued writes.
+  function notifyAuthRestored() {
+    if(!_authFailed) return;
+    _authFailed = false;
+    try { C.onAuthRestored?.(); } catch {}
+  }
+
+  function isAuthFailed() { return _authFailed; }
+
+  function clearTokenRefresh() {
+    if(_refreshTimer) { clearTimeout(_refreshTimer); _refreshTimer = null; }
+  }
+
+  // scheduleTokenRefresh() — arm a timer for REFRESH_MARGIN_SEC before exp.
+  // Called after every successful sign-in. Safe to call repeatedly; it
+  // replaces any existing timer.
+  function scheduleTokenRefresh() {
+    clearTokenRefresh();
+    if(!isGoogleAccount()) return;
+
+    const secsLeft = _tokenSecondsLeft();
+    if(secsLeft < 0) return; // unparseable — nothing to schedule against
+
+    // Fire 5 minutes before expiry, but never less than 5 seconds out.
+    const delayMs = Math.max(5, secsLeft - REFRESH_MARGIN_SEC) * 1000;
+    _refreshTimer = setTimeout(() => { refreshGoogleSession(); }, delayMs);
+  }
+
+  // attemptSilentRefresh() — try to get a fresh credential without any
+  // user interaction, via One Tap with auto_select. This succeeds when the
+  // user still has an active Google session in the browser, which is the
+  // common case. Resolves true on success, false on timeout or dismissal.
+  //
+  // Note: the credential callback here goes through _applyRefreshedToken,
+  // NOT handleGoogleCredential — a refresh must never re-run the data
+  // merge path. It swaps the credential and nothing else.
+  function attemptSilentRefresh() {
+    if(!isGoogleAuthAvailable()) return Promise.resolve(false);
+
+    return new Promise(async (resolve) => {
+      let settled = false;
+      const finish = (ok) => {
+        if(settled) return;
+        settled = true;
+        try { google.accounts.id.cancel(); } catch {}
+        resolve(ok);
+      };
+
+      // Hard timeout — One Tap can hang indefinitely when suppressed.
+      const timer = setTimeout(() => finish(false), SILENT_TIMEOUT_MS);
+
+      try {
+        await waitForGIS();
+        google.accounts.id.initialize({
+          client_id:   C.googleClientId,
+          auto_select: true,
+          callback:    (response) => {
+            clearTimeout(timer);
+            const ok = _applyRefreshedToken(response?.credential);
+            finish(ok);
+          },
+        });
+        google.accounts.id.prompt((notification) => {
+          // Not displayed or dismissed without a credential — silent
+          // refresh is not possible, fall back to an interactive prompt.
+          if(notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
+            clearTimeout(timer);
+            finish(false);
+          }
+        });
+      } catch {
+        clearTimeout(timer);
+        finish(false);
+      }
+    });
+  }
+
+  // _applyRefreshedToken(idToken) — swap in a new credential for the SAME
+  // account. Verifies the sub still matches so a different signed-in Google
+  // account can never silently take over the session. Returns true on success.
+  function _applyRefreshedToken(idToken) {
+    if(!idToken) return false;
+    const payload = _decodeJwt(idToken);
+    if(!payload?.sub) return false;
+
+    const expectedToken = getData()?.userToken;
+    if(expectedToken && expectedToken !== `google:${payload.sub}`) {
+      console.warn('[Auth] refresh returned a different Google account — ignoring.');
+      return false;
+    }
+
+    store.set(C.storageAuthKey, idToken);
+    scheduleTokenRefresh();
+    notifyAuthRestored();
+    return true;
+  }
+
+  // refreshGoogleSession() — the renewal entry point. Tries silent first;
+  // if that fails, prompts interactively WHILE THE OLD TOKEN IS STILL VALID
+  // (we are 5 minutes ahead of expiry), so the user has a window to act
+  // before writes start failing.
+  //
+  // Also callable on demand — the host app should call this when a write
+  // comes back 401, then retry the write once if it resolves true.
+  async function refreshGoogleSession() {
+    if(!isGoogleAccount()) return false;
+    if(_refreshInFlight) return false;
+    _refreshInFlight = true;
+
+    try {
+      const silent = await attemptSilentRefresh();
+      if(silent) return true;
+
+      // Silent path unavailable — ask the user. showGoogleReauth() resolves
+      // through signInWithGoogle → handleGoogleCredential, which now merges
+      // safely rather than clobbering local data.
+      notifyAuthFailure('refresh-needs-interaction');
+      setTimeout(() => showGoogleReauth(), 0);
+      return false;
+    } finally {
+      _refreshInFlight = false;
+    }
   }
 
   // ── verifyGoogleSession() ────────────────────────────────────────
@@ -460,10 +693,14 @@ const Auth = (() => {
     if(isGoogleAccount()) {
       const valid = await verifyGoogleSession();
       if(!valid) {
+        notifyAuthFailure('boot-session-expired');
         // Show targeted re-auth screen — skips full wizard, no worker URL needed
         setTimeout(() => showGoogleReauth(), 800);
         return false;
       }
+      // Session is good for now — arm the renewal timer so it stays good
+      // for as long as the tab is open.
+      scheduleTokenRefresh();
     }
 
     // 2. Legacy token upgrade prompt
@@ -1380,6 +1617,11 @@ const Auth = (() => {
     signInWithGoogle,       // render GIS button and sign in
     signOutGoogle,          // revoke session locally
     verifyGoogleSession,    // call at boot for Google accounts
+    refreshGoogleSession,   // renew the ID token — call on a 401, retry write if true
+    scheduleTokenRefresh,   // arm the pre-expiry renewal timer
+    isSessionExpiring,      // (marginSec) → true if the session is nearly dead
+    isAuthFailed,           // true while signed out / not syncing
+    notifyAuthFailure,      // host may call this if it detects a terminal 401
 
     // Boot helpers
     bootCheck,              // call after worker pull in DOMContentLoaded
