@@ -2183,3 +2183,58 @@ body.dark .auth-badge-token  { color: #d4b06e; border-color: rgba(212,176,110,.3
 body.dark .auth-badge-google { color: #7ab4f5; border-color: rgba(122,180,245,.3);  background: rgba(122,180,245,.1);  }
 body.dark .auth-badge-guest  { color: #aaa;    border-color: rgba(170,170,170,.3);  background: rgba(170,170,170,.08); }
 body.dark .auth-google-info  { border-color: rgba(255,255,255,.12); }
+
+/* ── Auth failure banner ──────────────────────────────────────────
+   Shown only while the Google session is dead and writes are not
+   landing. Deliberately not dismissible: hiding it would hide the
+   fact that nothing is being saved. Injected by app.js on demand. */
+.sync-auth-banner {
+  position: fixed;
+  bottom: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  max-width: calc(100vw - 2rem);
+  padding: .6rem .75rem .6rem 1rem;
+  border-radius: var(--radius);
+  background: var(--red-soft);
+  color: var(--cream);
+  font-size: .85rem;
+  line-height: 1.3;
+  box-shadow: var(--shadow-lg);
+}
+.sync-auth-banner-text {
+  font-weight: 500;
+}
+.sync-auth-banner-btn {
+  flex-shrink: 0;
+  padding: .28rem .7rem;
+  border: 1px solid rgba(250,247,242,.45);
+  border-radius: var(--radius-sm);
+  background: rgba(250,247,242,.18);
+  color: var(--cream);
+  font-family: inherit;
+  font-size: .8rem;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.sync-auth-banner-btn:hover {
+  background: rgba(250,247,242,.3);
+}
+
+@media (max-width: 520px) {
+  .sync-auth-banner {
+    left: 1rem;
+    right: 1rem;
+    transform: none;
+    justify-content: space-between;
+  }
+}
+
+body.dark .sync-auth-banner {
+  background: #8f2d22;
+  color: #f2ede5;
+}
