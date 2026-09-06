@@ -700,6 +700,31 @@ async function handleStorage(request, env, pathname, cors) {
     const auth = await checkKvAuth(request, token, cors, true, bodyText, env);
     if (!auth.ok) return auth.response;
 
+    // ── Stale-write guard ──────────────────────────────────────────
+    // Previously this was blind last-write-wins: a client holding an old
+    // copy could silently overwrite newer KV data. Now, if the submission
+    // carries a lastModified and the stored copy is NEWER, reject with 409
+    // and tell the client both timestamps so it can pull, merge, and retry.
+    //
+    // Writes with NO lastModified are allowed through unconditionally —
+    // imports, migrations, and internal writes must not be blocked by this.
+    const submittedAt = Number(parsed?.lastModified) || 0;
+    if (submittedAt > 0) {
+      const existingText = await env[KV_BINDING].get(kvKey, { type: 'text' });
+      if (existingText !== null) {
+        let storedAt = 0;
+        try { storedAt = Number(JSON.parse(existingText)?.lastModified) || 0; } catch { storedAt = 0; }
+        if (storedAt > submittedAt) {
+          return respond(JSON.stringify({
+            error: 'Stale write — stored copy is newer',
+            conflict: true,
+            storedAt,
+            submittedAt,
+          }), 409, cors);
+        }
+      }
+    }
+
     // Write legacy forwarding pointer if _legacyToken present
     parsed = await writeLegacyPointerIfNeeded(parsed, token, env);
 
